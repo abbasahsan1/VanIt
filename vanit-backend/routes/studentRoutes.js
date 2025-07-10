@@ -78,7 +78,7 @@ router.post('/get-student-by-email', async (req, res) => {
 
   try {
     const [result] = await pool.query(
-      'SELECT first_name, registration_number, route_name, stop_name FROM students WHERE email = ?',
+      'SELECT id, first_name, registration_number, route_name, stop_name FROM students WHERE email = ?',
       [email]
     );
     if (result.length === 0) return res.status(404).json({ error: 'Student not found' });

@@ -103,6 +103,8 @@ model stops {
   id         Int       @id @default(autoincrement())
   stop_name  String    @db.VarChar(100)
   route_id   Int?
+  latitude   Decimal?  @db.Decimal(10, 7)
+  longitude  Decimal?  @db.Decimal(10, 7)
   created_at DateTime? @default(now()) @db.Timestamp(0)
   routes     routes?   @relation(fields: [route_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "stops_ibfk_1")
 

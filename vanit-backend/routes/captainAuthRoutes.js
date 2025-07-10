@@ -152,7 +152,7 @@ router.post('/check-phone-token', async (req, res) => {
   
       const captainId = cap[0].id;
       
-      await pool.query('UPDATE captains SET is_active = 1, current_route = ? WHERE id = ?', [routeName, captainId]);
+      await pool.query('UPDATE captains SET is_active = 1 WHERE id = ?', [captainId]);
       
       res.status(200).json({ message: 'Ride started successfully', captainId, routeName });
   
@@ -173,7 +173,7 @@ router.post('/check-phone-token', async (req, res) => {
   
       const captainId = cap[0].id;
       
-      await pool.query('UPDATE captains SET is_active = 0, current_route = NULL WHERE id = ?', [captainId]);
+      await pool.query('UPDATE captains SET is_active = 0 WHERE id = ?', [captainId]);
       
       res.status(200).json({ message: 'Ride stopped successfully', captainId });
   

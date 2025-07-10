@@ -11,6 +11,8 @@ const pool = require('../config/db');
 router.post('/captain/location', async (req, res) => {
     const { captainId, latitude, longitude, timestamp } = req.body;
 
+    console.log(`📍 HTTP API location update received:`, { captainId, latitude, longitude, timestamp });
+
     if (!captainId || !latitude || !longitude) {
         return res.status(400).json({ 
             error: "Missing required fields: captainId, latitude, longitude" 
@@ -20,7 +22,7 @@ router.post('/captain/location', async (req, res) => {
     try {
         // Verify captain exists and is active
         const [captainData] = await pool.query(
-            'SELECT id, status FROM captains WHERE id = ?',
+            'SELECT id, is_active FROM captains WHERE id = ?',
             [captainId]
         );
 
@@ -28,7 +30,7 @@ router.post('/captain/location', async (req, res) => {
             return res.status(404).json({ error: "Captain not found" });
         }
 
-        if (captainData[0].status !== 'active') {
+        if (captainData[0].is_active !== 1) {
             return res.status(400).json({ error: "Captain is not active" });
         }
 
@@ -82,9 +84,14 @@ router.get('/captain/:captainId/location', async (req, res) => {
  */
 router.get('/route/:routeName/locations', async (req, res) => {
     const { routeName } = req.params;
+    
+    // Decode the route name in case it was URL encoded
+    const decodedRouteName = decodeURIComponent(routeName);
+    console.log(`📍 Getting locations for route: "${decodedRouteName}"`);
 
     try {
-        const locations = await locationService.getRouteLocations(routeName);
+        const locations = await locationService.getRouteLocations(decodedRouteName);
+        console.log(`📍 Found ${locations.length} active captains for route: "${decodedRouteName}"`);
         res.status(200).json(locations);
     } catch (error) {
         console.error('Error getting route locations:', error);
@@ -103,7 +110,7 @@ router.post('/captain/:captainId/start-tracking', async (req, res) => {
     try {
         // Verify captain exists
         const [captainData] = await pool.query(
-            'SELECT id, status FROM captains WHERE id = ?',
+            'SELECT id, is_active FROM captains WHERE id = ?',
             [captainId]
         );
 
@@ -166,18 +173,56 @@ router.get('/captains/active', async (req, res) => {
  */
 router.get('/student/:studentId/last-notification', async (req, res) => {
     const { studentId } = req.params;
+    console.log(`🔔 Getting last notification for student: ${studentId}`);
 
     try {
         const redisClient = require('../config/redis');
         const notification = await redisClient.get(`student:${studentId}:last_notification`);
         
         if (notification) {
+            console.log(`🔔 Found notification for student ${studentId}:`, notification);
             res.status(200).json(notification);
         } else {
+            console.log(`🔔 No notifications found for student ${studentId}`);
             res.status(404).json({ error: "No recent notifications" });
         }
     } catch (error) {
         console.error('Error getting student notification:', error);
+        res.status(500).json({ error: "Internal server error" });
+    }
+});
+
+/**
+ * ---------------------------
+ * ✅ Debug: Force Activate Captain (POST)
+ * ---------------------------
+ */
+router.post('/debug/activate-captain/:captainId', async (req, res) => {
+    const { captainId } = req.params;
+    
+    try {
+        const normalizedCaptainId = parseInt(captainId);
+        console.log(`🔧 DEBUG: Force activating captain ${normalizedCaptainId}`);
+        
+        await pool.query('UPDATE captains SET is_active = 1 WHERE id = ?', [normalizedCaptainId]);
+        
+        // Also add some mock location data
+        const mockLocation = {
+            captainId: normalizedCaptainId,
+            latitude: 33.555957,
+            longitude: 73.131175,
+            timestamp: new Date().toISOString()
+        };
+        
+        const locationService = require('../services/locationService');
+        locationService.activeCaptains.set(normalizedCaptainId, mockLocation);
+        
+        res.status(200).json({ 
+            message: `Captain ${normalizedCaptainId} forcefully activated`,
+            location: mockLocation
+        });
+    } catch (error) {
+        console.error('Error force activating captain:', error);
         res.status(500).json({ error: "Internal server error" });
     }
 });

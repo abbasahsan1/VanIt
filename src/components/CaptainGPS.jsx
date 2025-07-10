@@ -33,13 +33,18 @@ const CaptainGPS = () => {
     const newSocket = io('http://localhost:5000');
     
     newSocket.on('connect', () => {
-      console.log('Connected to WebSocket server');
+      console.log('✅ Captain WebSocket connected:', newSocket.id);
       setIsConnected(true);
     });
 
     newSocket.on('disconnect', () => {
-      console.log('Disconnected from WebSocket server');
+      console.log('❌ Captain WebSocket disconnected');
       setIsConnected(false);
+    });
+
+    newSocket.on('connect_error', (error) => {
+      console.error('❌ Captain WebSocket connection error:', error);
+      setError('WebSocket connection failed');
     });
 
     setSocket(newSocket);
@@ -63,28 +68,51 @@ const CaptainGPS = () => {
           setCaptainId(response.data.captainId);
           setRouteName(response.data.routeName || 'Unknown Route');
           
-          if (response.data.isActive) {
-            console.log('Captain is already active, starting tracking automatically...');
+          console.log('👤 Captain info loaded:', {
+            captainId: response.data.captainId,
+            routeName: response.data.routeName,
+            isActive: response.data.isActive
+          });
+          
+          if (!isTracking && !autoStarted && socket && socket.connected) {
+            console.log('🚀 Auto-starting GPS tracking for captain...');
             setAutoStarted(true);
+            // Add a delay to ensure socket connection is established
             setTimeout(() => {
-              startTracking();
-            }, 1000);
+              if (!isTracking) { // Double check to prevent duplicate starts
+                console.log('🎯 Triggering auto-start...');
+                startTracking();
+              }
+            }, 3000); // Increased delay to ensure everything is ready
           }
         }
       } catch (error) {
-        console.error('Error fetching captain info:', error);
+        console.error('❌ Error fetching captain info:', error);
         setError('Failed to load captain information');
       }
     };
 
     fetchCaptainInfo();
-  }, [navigate]);
+  }, [navigate]); // Removed dependencies to prevent re-runs
 
   const getCurrentLocation = () => {
     return new Promise((resolve, reject) => {
       if (!navigator.geolocation) {
         reject(new Error('Geolocation is not supported by this browser'));
         return;
+      }
+
+      console.log('🔍 Requesting geolocation...');
+
+      // Check permission status first
+      if (navigator.permissions) {
+        navigator.permissions.query({ name: 'geolocation' }).then((result) => {
+          console.log('Geolocation permission status:', result.state);
+          if (result.state === 'denied') {
+            reject(new Error('Location access denied. Please enable location permissions in your browser settings.'));
+            return;
+          }
+        });
       }
 
       navigator.geolocation.getCurrentPosition(
@@ -95,94 +123,239 @@ const CaptainGPS = () => {
             accuracy: position.coords.accuracy,
             timestamp: new Date().toISOString()
           };
+          console.log('✅ Real GPS location obtained:', location);
+          console.log(`📍 Accuracy: ±${Math.round(location.accuracy)}m`);
+          
+          // Validate that this is not a mock location
+          if (location.accuracy > 10000) {
+            console.warn('⚠️ Low accuracy location detected, might be mock location');
+          }
+          
           resolve(location);
         },
         (error) => {
-          reject(error);
+          console.error('❌ Geolocation error:', error);
+          let errorMessage;
+          switch (error.code) {
+            case error.PERMISSION_DENIED:
+              errorMessage = 'Location access denied. Please enable location permissions and refresh the page.';
+              break;
+            case error.POSITION_UNAVAILABLE:
+              errorMessage = 'Location information unavailable. Please ensure GPS is enabled.';
+              break;
+            case error.TIMEOUT:
+              errorMessage = 'Location request timed out. Please try again.';
+              break;
+            default:
+              errorMessage = 'Unknown location error occurred.';
+              break;
+          }
+          reject(new Error(errorMessage));
         },
         {
           enableHighAccuracy: true,
-          timeout: 10000,
+          timeout: 15000, // Increased timeout
           maximumAge: 30000
         }
       );
     });
   };
 
+  const sendLocationUpdate = async (location) => {
+    try {
+      if (!captainId || !socket) {
+        console.error('❌ Cannot send location - missing captainId or socket:', { 
+          captainId, 
+          socketConnected: !!socket && socket.connected,
+          routeName
+        });
+        return;
+      }
+
+      // Validate location data
+      if (!location.latitude || !location.longitude) {
+        console.error('❌ Invalid location data:', location);
+        return;
+      }
+
+      const locationData = {
+        captainId,
+        latitude: location.latitude,
+        longitude: location.longitude,
+        timestamp: location.timestamp,
+        routeName
+      };
+
+      console.log('📤 Sending location via HTTP API:', locationData);
+      
+      // Send via HTTP API
+      const httpResponse = await axios.post('http://localhost:5000/api/location/captain/location', locationData);
+      console.log('✅ HTTP API response:', httpResponse.status);
+
+      console.log('📡 Sending location via WebSocket:', locationData);
+
+      // Send via WebSocket only if connected
+      if (socket && socket.connected) {
+        socket.emit('captain_location_update', locationData);
+        console.log('✅ WebSocket location sent successfully');
+      } else {
+        console.error('❌ WebSocket not connected, skipping WebSocket update');
+      }
+      
+    } catch (error) {
+      console.error('❌ Error sending location:', error);
+      setError(`Failed to send location: ${error.message}`);
+      throw error;
+    }
+  };
+
   const startTracking = async () => {
     try {
       setError(null);
+      setIsTracking(true);
       
+      console.log('� Starting GPS tracking...');
+      
+      // First, notify backend that tracking has started
+      if (captainId) {
+        console.log('🎯 Notifying backend - starting tracking for captain:', captainId);
+        await axios.post(`http://localhost:5000/api/location/captain/${captainId}/start-tracking`);
+        console.log('✅ Backend tracking started');
+      }
+      
+      // Test location access first
       const location = await getCurrentLocation();
       setCurrentLocation(location);
+      setLastUpdate(new Date().toISOString());
+      
+      // Send initial location
+      await sendLocationUpdate(location);
+      
+      console.log('✅ Initial location sent, starting interval...');
 
+      // Clear any existing interval first
+      if (locationIntervalRef.current) {
+        clearInterval(locationIntervalRef.current);
+      }
+
+      // Set up location tracking interval
       const interval = setInterval(async () => {
         try {
+          console.log('⏰ Interval triggered - getting new location...');
           const newLocation = await getCurrentLocation();
           setCurrentLocation(newLocation);
           setLastUpdate(new Date().toISOString());
 
-          if (captainId && socket) {
-            await axios.post('http://localhost:5000/api/location/captain/location', {
-              captainId,
-              latitude: newLocation.latitude,
-              longitude: newLocation.longitude,
-              timestamp: newLocation.timestamp
-            });
-
-            socket.emit('captain_location_update', {
-              captainId,
-              latitude: newLocation.latitude,
-              longitude: newLocation.longitude,
-              timestamp: newLocation.timestamp,
-              routeName
-            });
-          }
+          await sendLocationUpdate(newLocation);
+          console.log('✅ Location update cycle completed successfully');
         } catch (error) {
-          console.error('Error updating location:', error);
-          setError('Failed to update location');
+          console.error('❌ Error in tracking interval:', error);
+          setError('GPS tracking interrupted: ' + error.message);
+          
+          // If it's a permission error, stop tracking completely
+          if (error.message.includes('denied') || error.message.includes('permission')) {
+            console.error('❌ Stopping tracking due to permission error');
+            clearInterval(interval);
+            setIsTracking(false);
+            setAutoStarted(false);
+          }
+          // For other errors, just log and continue trying
         }
-      }, parseInt(process.env.LOCATION_INTERVAL_MS) || 5000);
+      }, 5000); // Update location every 5 seconds
 
       locationIntervalRef.current = interval;
-      setIsTracking(true);
-
-      if (captainId) {
-        await axios.post(`http://localhost:5000/api/location/captain/${captainId}/start-tracking`);
-      }
-
-      console.log('Location tracking started');
+      console.log('✅ Location tracking started successfully');
     } catch (error) {
-      console.error('Error starting tracking:', error);
-      setError('Failed to start location tracking. Please check your location permissions.');
+      console.error('❌ Failed to start tracking:', error);
+      setError(`Failed to start location tracking: ${error.message}`);
+      setIsTracking(false);
+      
+      // Clear interval if it was set
+      if (locationIntervalRef.current) {
+        clearInterval(locationIntervalRef.current);
+        locationIntervalRef.current = null;
+      }
+      
+      // Show helpful instructions
+      if (error.message.includes('denied') || error.message.includes('permission')) {
+        setError(
+          '📍 Location access required for GPS tracking. Please:\n' +
+          '1. Click the location icon in your browser address bar\n' +
+          '2. Select "Allow" for location access\n' +
+          '3. Refresh the page and try again'
+        );
+      }
+    }
+  };
+
+  const requestLocationPermission = async () => {
+    try {
+      setError(null);
+      console.log('🔓 Testing location permission...');
+      
+      // Don't start full tracking, just test location access
+      const location = await getCurrentLocation();
+      console.log('✅ Location permission granted:', location);
+      
+      // Set the location temporarily for display
+      setCurrentLocation(location);
+      
+      setError(null);
+      
+      // Show success message
+      alert(`✅ Location access working!\nLatitude: ${location.latitude.toFixed(6)}\nLongitude: ${location.longitude.toFixed(6)}\n\nYou can now start ride tracking.`);
+      
+    } catch (error) {
+      console.error('❌ Permission test failed:', error);
+      setError(
+        `❌ Test failed: ${error.message}\n\n` +
+        'To enable location access:\n' +
+        '1. Look for the location icon 📍 in your browser\'s address bar\n' +
+        '2. Click it and select "Allow"\n' +
+        '3. If no icon appears, go to Site Settings and enable Location\n' +
+        '4. Refresh this page and try again'
+      );
     }
   };
 
   const stopTracking = async () => {
-    if (locationIntervalRef.current) {
-      clearInterval(locationIntervalRef.current);
-      locationIntervalRef.current = null;
-    }
-
-    setIsTracking(false);
-    setCurrentLocation(null);
-    setLastUpdate(null);
-
-    if (captainId) {
-      try {
-        await axios.post(`http://localhost:5000/api/location/captain/${captainId}/stop-tracking`);
-        const phone = localStorage.getItem('captainPhone');
-        await axios.post('http://localhost:5000/api/auth/captains/stop-ride', {
-          phone: phone
-        });
-        alert('Ride stopped successfully! Redirecting to portal...');
-        navigate('/captain/home');
-      } catch (error) {
-        console.error('Error stopping tracking:', error);
+    try {
+      console.log('🛑 Stopping GPS tracking...');
+      
+      // Clear interval first
+      if (locationIntervalRef.current) {
+        clearInterval(locationIntervalRef.current);
+        locationIntervalRef.current = null;
+        console.log('✅ Location interval cleared');
       }
-    }
 
-    console.log('Location tracking stopped');
+      setIsTracking(false);
+      setCurrentLocation(null);
+      setLastUpdate(null);
+
+      if (captainId) {
+        try {
+          console.log('🎯 Notifying backend - stopping tracking for captain:', captainId);
+          await axios.post(`http://localhost:5000/api/location/captain/${captainId}/stop-tracking`);
+          console.log('✅ Backend tracking stopped');
+          
+          const phone = localStorage.getItem('captainPhone');
+          await axios.post('http://localhost:5000/api/auth/captains/stop-ride', {
+            phone: phone
+          });
+          console.log('✅ Ride stopped successfully');
+          
+          alert('Ride stopped successfully! Redirecting to portal...');
+          navigate('/captain/home');
+        } catch (error) {
+          console.error('❌ Error stopping tracking on backend:', error);
+        }
+      }
+
+      console.log('✅ Location tracking stopped');
+    } catch (error) {
+      console.error('❌ Error in stopTracking:', error);
+    }
   };
 
   const formatTime = (timestamp) => {
@@ -229,9 +402,50 @@ const CaptainGPS = () => {
         </div>
 
         {error && (
-          <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-6 flex items-center">
-            <FaExclamationTriangle className="mr-2" />
-            {error}
+          <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-6">
+            <div className="flex items-start">
+              <FaExclamationTriangle className="mr-2 mt-1 flex-shrink-0" />
+              <div className="flex-grow">
+                <div className="whitespace-pre-line">{error}</div>
+                {error.includes('permission') && (
+                  <div className="mt-3 space-x-2">
+                    <button
+                      onClick={requestLocationPermission}
+                      className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors duration-200 text-sm"
+                    >
+                      🔓 Request Location Permission
+                    </button>
+                    <button
+                      onClick={() => window.location.reload()}
+                      className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors duration-200 text-sm"
+                    >
+                      🔄 Reload Page
+                    </button>
+                  </div>
+                )}
+                {!error.includes('permission') && (
+                  <button
+                    onClick={() => {
+                      setError(null);
+                      setAutoStarted(false);
+                      setIsTracking(false);
+                      if (locationIntervalRef.current) {
+                        clearInterval(locationIntervalRef.current);
+                        locationIntervalRef.current = null;
+                      }
+                      setTimeout(() => {
+                        if (captainId && socket && socket.connected) {
+                          startTracking();
+                        }
+                      }, 1000);
+                    }}
+                    className="mt-3 bg-orange-600 text-white px-4 py-2 rounded-lg hover:bg-orange-700 transition-colors duration-200 text-sm"
+                  >
+                    🔄 Retry GPS Tracking
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
         )}
 
@@ -251,6 +465,16 @@ const CaptainGPS = () => {
                 {isTracking ? 'Active' : 'Inactive'}
               </span>
             </div>
+          </div>
+
+          <div className="mb-4">
+            <button
+              onClick={requestLocationPermission}
+              className="flex items-center px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors text-sm"
+            >
+              <FaLocationArrow className="mr-2" />
+              🧪 Test Location Access
+            </button>
           </div>
 
           <div className="flex space-x-4">

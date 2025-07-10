@@ -5,6 +5,36 @@ class LocationService {
     constructor() {
         this.activeCaptains = new Map(); // captainId -> location data
         this.notificationCooldowns = new Map(); // stopId -> last notification time
+        
+        // Initialize active captains from database on startup
+        this.initializeActiveCaptains();
+    }
+    
+    // Load currently active captains from database into memory
+    async initializeActiveCaptains() {
+        try {
+            const [activeCaptains] = await pool.query(
+                'SELECT id, route_name, first_name, last_name FROM captains WHERE is_active = 1'
+            );
+            
+            console.log(`🔄 Initializing ${activeCaptains.length} active captains from database`);
+            
+            // Try to restore location data from Redis for each active captain
+            for (const captain of activeCaptains) {
+                try {
+                    const redisData = await redisClient.get(`captain:${captain.id}:location`);
+                    if (redisData) {
+                        const locationData = typeof redisData === 'string' ? JSON.parse(redisData) : redisData;
+                        this.activeCaptains.set(captain.id, locationData);
+                        console.log(`✅ Restored location data for captain ${captain.id}`);
+                    }
+                } catch (error) {
+                    console.log(`❌ Could not restore location for captain ${captain.id}:`, error.message);
+                }
+            }
+        } catch (error) {
+            console.error('Error initializing active captains:', error);
+        }
     }
 
     // Calculate distance between two points using Haversine formula
@@ -27,35 +57,54 @@ class LocationService {
     // Update captain location and broadcast to subscribers
     async updateCaptainLocation(captainId, latitude, longitude, timestamp) {
         try {
+            // Ensure captainId is always an integer
+            const normalizedCaptainId = parseInt(captainId);
+            
+            console.log(`📍 Location update received for captain ${normalizedCaptainId}: ${latitude}, ${longitude}`);
+            
             // Store in memory for quick access
             const locationData = {
-                captainId,
+                captainId: normalizedCaptainId,
                 latitude: parseFloat(latitude),
                 longitude: parseFloat(longitude),
                 timestamp: timestamp || new Date().toISOString()
             };
 
-            this.activeCaptains.set(captainId, locationData);
+            this.activeCaptains.set(normalizedCaptainId, locationData);
+            console.log(`💾 Stored location in memory for captain ${normalizedCaptainId}`);
 
-            await redisClient.set(`captain:${captainId}:location`, JSON.stringify(locationData), 300);
+            await redisClient.set(`captain:${normalizedCaptainId}:location`, JSON.stringify(locationData), 300);
 
-            // Get captain's route information
+            // Get captain's route information and auto-activate captain
             const [captainData] = await pool.query(
-                'SELECT route_name FROM captains WHERE id = ?',
-                [captainId]
+                'SELECT route_name, first_name, last_name, is_active FROM captains WHERE id = ?',
+                [normalizedCaptainId]
             );
 
             if (captainData.length > 0) {
                 const routeName = captainData[0].route_name;
                 
-                // Broadcast to route subscribers
-                await redisClient.publish(`route:${routeName}:locations`, {
-                    type: 'location_update',
-                    data: locationData
-                });
+                // Auto-activate captain if not already active
+                if (captainData[0].is_active !== 1) {
+                    console.log(`🚀 Auto-activating captain ${normalizedCaptainId} for route ${routeName}`);
+                    await pool.query('UPDATE captains SET is_active = 1 WHERE id = ?', [normalizedCaptainId]);
+                }
+                const captainName = `${captainData[0].first_name} ${captainData[0].last_name}`;
+                
+                // Enhanced location data with captain information
+                const enhancedLocationData = {
+                    ...locationData,
+                    captainName,
+                    routeName
+                };
+                
+                // Broadcast to route subscribers using Redis publish
+                const publishData = JSON.stringify(enhancedLocationData);
+                await redisClient.publish(`route:${routeName}:locations`, publishData);
+                console.log(`Published location update for route ${routeName}:`, enhancedLocationData);
 
                 // Check for nearby stops and trigger notifications
-                await this.checkNearbyStops(captainId, latitude, longitude, routeName);
+                await this.checkNearbyStops(normalizedCaptainId, latitude, longitude, routeName);
             }
 
             return true;
@@ -78,7 +127,7 @@ class LocationService {
 
             const routeId = routeData[0].id;
             const [stops] = await pool.query(
-                'SELECT id, stop_name FROM stops WHERE route_id = ?',
+                'SELECT id, stop_name, latitude, longitude FROM stops WHERE route_id = ?',
                 [routeId]
             );
 
@@ -86,10 +135,23 @@ class LocationService {
             const cooldownMs = parseInt(process.env.NOTIFICATION_COOLDOWN_MS) || 1800000; // 30 minutes
 
             for (const stop of stops) {
-                // For demo purposes, we'll use mock stop coordinates
-                // In production, you'd store actual coordinates for each stop
-                const stopLat = 33.6844 + (Math.random() - 0.5) * 0.1; // Mock coordinates around Islamabad
-                const stopLon = 73.0479 + (Math.random() - 0.5) * 0.1;
+                // Use actual stop coordinates if available, otherwise use mock coordinates
+                let stopLat, stopLon;
+                
+                if (stop.latitude && stop.longitude) {
+                    stopLat = parseFloat(stop.latitude);
+                    stopLon = parseFloat(stop.longitude);
+                } else {
+                    // Mock coordinates around Islamabad/Rawalpindi for demo
+                    stopLat = 33.6844 + (Math.random() - 0.5) * 0.1;
+                    stopLon = 73.0479 + (Math.random() - 0.5) * 0.1;
+                    
+                    // Update the stop with mock coordinates for consistency
+                    await pool.query(
+                        'UPDATE stops SET latitude = ?, longitude = ? WHERE id = ?',
+                        [stopLat, stopLon, stop.id]
+                    );
+                }
 
                 const distance = this.calculateDistance(latitude, longitude, stopLat, stopLon);
 
@@ -145,7 +207,9 @@ class LocationService {
             };
 
             // Broadcast notification to route subscribers
-            await redisClient.publish(`route:${routeName}:notifications`, notification);
+            const publishData = JSON.stringify(notification);
+            await redisClient.publish(`route:${routeName}:notifications`, publishData);
+            console.log(`Published notification for route ${routeName}:`, notification);
 
             // Store notification in Redis for students who might be offline
             for (const student of students) {
@@ -165,22 +229,48 @@ class LocationService {
     // Get all active captain locations for a route
     async getRouteLocations(routeName) {
         try {
+            console.log(`🔍 Looking for active captains on route: "${routeName}"`);
+            
             const [captains] = await pool.query(
-                'SELECT id, first_name, last_name FROM captains WHERE route_name = ? AND status = "active"',
+                'SELECT id, first_name, last_name, is_active FROM captains WHERE route_name = ? AND is_active = 1',
                 [routeName]
             );
+            
+            console.log(`🔍 Database query found ${captains.length} active captains for route "${routeName}"`);
+            if (captains.length > 0) {
+                console.log('🔍 Active captains:', captains.map(c => `ID: ${c.id}, Name: ${c.first_name} ${c.last_name}`));
+            }
 
             const locations = [];
             for (const captain of captains) {
-                const location = this.activeCaptains.get(captain.id);
+                // Try memory first, then Redis as fallback
+                let location = this.activeCaptains.get(captain.id);
+                console.log(`🔍 Memory lookup for captain ${captain.id}:`, location ? 'FOUND' : 'NOT FOUND');
+                
+                if (!location) {
+                    // Fallback to Redis - try both string and number keys
+                    const redisData = await redisClient.get(`captain:${captain.id}:location`);
+                    if (redisData) {
+                        location = typeof redisData === 'string' ? JSON.parse(redisData) : redisData;
+                        console.log(`🔍 Redis lookup for captain ${captain.id}: FOUND`);
+                    } else {
+                        console.log(`🔍 Redis lookup for captain ${captain.id}: NOT FOUND`);
+                    }
+                }
+                
                 if (location) {
                     locations.push({
                         ...location,
+                        captainId: captain.id, // Ensure captain ID is always set
                         captainName: `${captain.first_name} ${captain.last_name}`
                     });
+                    console.log(`✅ Added captain ${captain.id} to locations list`);
+                } else {
+                    console.log(`❌ No location data found for captain ${captain.id}`);
                 }
             }
 
+            console.log(`📍 Returning ${locations.length} captain locations for route: "${routeName}"`);
             return locations;
         } catch (error) {
             console.error('Error getting route locations:', error);
@@ -191,10 +281,13 @@ class LocationService {
     // Get captain's current location
     async getCaptainLocation(captainId) {
         try {
-            let location = this.activeCaptains.get(captainId);
+            // Ensure captainId is always an integer
+            const normalizedCaptainId = parseInt(captainId);
+            
+            let location = this.activeCaptains.get(normalizedCaptainId);
             
             if (!location) {
-                const redisData = await redisClient.get(`captain:${captainId}:location`);
+                const redisData = await redisClient.get(`captain:${normalizedCaptainId}:location`);
                 if (redisData) {
                     location = typeof redisData === 'string' ? JSON.parse(redisData) : redisData;
                 }
@@ -215,9 +308,10 @@ class LocationService {
 
     // Stop location tracking for a captain
     stopTracking(captainId) {
-        this.activeCaptains.delete(captainId);
-        redisClient.del(`captain:${captainId}:location`);
-        console.log(`Stopped tracking for captain ${captainId}`);
+        const normalizedCaptainId = parseInt(captainId);
+        this.activeCaptains.delete(normalizedCaptainId);
+        redisClient.del(`captain:${normalizedCaptainId}:location`);
+        console.log(`Stopped tracking for captain ${normalizedCaptainId}`);
     }
 
     // Get all active captains

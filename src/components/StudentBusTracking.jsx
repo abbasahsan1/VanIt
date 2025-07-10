@@ -38,18 +38,30 @@ const StudentBusTracking = () => {
     });
 
     newSocket.on('location_update', (data) => {
-      console.log('Received captain location update:', data);
-      setCaptainLocation(data);
+      console.log('🚌 Received captain location update:', data);
+      setCaptainLocation({
+        captainId: data.captainId,
+        latitude: parseFloat(data.latitude),
+        longitude: parseFloat(data.longitude),
+        timestamp: data.timestamp,
+        captainName: data.captainName,
+        routeName: data.routeName
+      });
     });
 
     newSocket.on('notification', (data) => {
-      console.log('Received notification:', data);
+      console.log('🔔 Received notification:', data);
       setLastNotification(data);
       setShowNotification(true);
       
       setTimeout(() => {
         setShowNotification(false);
       }, 10000);
+    });
+
+    newSocket.on('error', (error) => {
+      console.error('Socket error:', error);
+      setError('Connection error occurred');
     });
 
     setSocket(newSocket);
@@ -74,8 +86,30 @@ const StudentBusTracking = () => {
           setStudentData(student);
 
           if (student.route_name && socket) {
+            console.log(`🔗 Subscribing to route: "${student.route_name}"`);
             socket.emit('subscribe_route', student.route_name);
-            console.log(`Subscribed to route: ${student.route_name}`);
+            console.log(`✅ Subscription sent for route: ${student.route_name}`);
+            
+            // Add a small delay and check server response
+            setTimeout(() => {
+              console.log(`🔍 Checking subscription status for route: ${student.route_name}`);
+            }, 1000);
+            
+            // Immediately check for any existing captain location on this route
+            try {
+              console.log(`📍 Checking for existing locations on route: ${student.route_name}`);
+              const locationResponse = await axios.get(`http://localhost:5000/api/location/route/${encodeURIComponent(student.route_name)}/locations`);
+              console.log(`📍 Location API response:`, locationResponse.data);
+              if (locationResponse.status === 200 && locationResponse.data.length > 0) {
+                const activeLocation = locationResponse.data[0];
+                console.log('Found existing captain location:', activeLocation);
+                setCaptainLocation(activeLocation);
+              } else {
+                console.log('No active captains found for this route');
+              }
+            } catch (error) {
+              console.error('Error fetching captain location:', error);
+            }
           }
 
           if (student.id) {

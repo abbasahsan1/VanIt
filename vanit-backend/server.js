@@ -1,6 +1,10 @@
 const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
+
+// Load environment variables first
+dotenv.config({ path: 'x:\\vanit\\VanIt-Fresh\\vanit-backend\\.env' });
+
 const http = require('http');
 const socketIo = require('socket.io');
 const redisClient = require('./config/redis');
@@ -18,8 +22,6 @@ const captainAuthRoutes = require('./routes/captainAuthRoutes');
 const feedbackRoutes = require('./routes/feedbackRoutes');
 const captainComplaintRoutes = require('./routes/captainComplaintRoutes');
 const locationRoutes = require('./routes/locationRoutes');
-
-dotenv.config();
 
 const app = express();
 const server = http.createServer(app);
@@ -62,7 +64,8 @@ io.on('connection', (socket) => {
 
     socket.on('subscribe_route', (routeName) => {
         socket.join(`route:${routeName}`);
-        console.log(`Client ${socket.id} subscribed to route: ${routeName}`);
+        console.log(`✅ Client ${socket.id} subscribed to route: ${routeName}`);
+        console.log(`📊 Current route ${routeName} subscribers:`, io.sockets.adapter.rooms.get(`route:${routeName}`)?.size || 0);
     });
 
     socket.on('unsubscribe_route', (routeName) => {
@@ -70,11 +73,42 @@ io.on('connection', (socket) => {
         console.log(`Client ${socket.id} unsubscribed from route: ${routeName}`);
     });
 
-    socket.on('captain_location_update', (data) => {
-        const { captainId, latitude, longitude, timestamp } = data;
-        console.log(`Captain ${captainId} location update:`, { latitude, longitude });
+    socket.on('captain_location_update', async (data) => {
+        const { captainId, latitude, longitude, timestamp, routeName } = data;
+        const normalizedCaptainId = parseInt(captainId);
+        console.log(`🚌 Captain ${normalizedCaptainId} location update received:`, { latitude, longitude, routeName });
         
-        socket.broadcast.to(`route:${data.routeName}`).emit('location_update', data);
+        try {
+            // Import location service
+            const locationService = require('./services/locationService');
+            
+            // Update location through service (this handles Redis publishing and notifications)
+            await locationService.updateCaptainLocation(normalizedCaptainId, latitude, longitude, timestamp);
+            
+            // Get captain details for enhanced data
+            const pool = require('./config/db');
+            const [captainData] = await pool.query(
+                'SELECT first_name, last_name, route_name FROM captains WHERE id = ?',
+                [normalizedCaptainId]
+            );
+            
+            if (captainData.length > 0) {
+                const captain = captainData[0];
+                const enhancedData = {
+                    ...data,
+                    captainId: normalizedCaptainId,
+                    captainName: `${captain.first_name} ${captain.last_name}`,
+                    routeName: captain.route_name
+                };
+                
+                // Broadcast to route subscribers with enhanced data
+                io.to(`route:${captain.route_name}`).emit('location_update', enhancedData);
+                console.log(`🚌 Location broadcasted to route: ${captain.route_name} (${io.sockets.adapter.rooms.get(`route:${captain.route_name}`)?.size || 0} subscribers)`);
+                console.log(`📍 Enhanced data:`, enhancedData);
+            }
+        } catch (error) {
+            console.error('❌ Error processing captain location update:', error);
+        }
     });
 
     socket.on('disconnect', () => {
@@ -85,14 +119,38 @@ io.on('connection', (socket) => {
 // Redis subscription for broadcasting location updates
 const setupRedisSubscriptions = async () => {
     try {
-        await redisClient.subscribe('route:*:locations', (message) => {
-            const routeName = message.channel.split(':')[1];
-            io.to(`route:${routeName}`).emit('location_update', message.data);
+        // Create a separate subscriber client for pattern subscriptions
+        const { createClient } = require('redis');
+        const subscriber = createClient({
+            url: process.env.REDIS_URL || 'redis://localhost:6379'
+        });
+        
+        await subscriber.connect();
+        
+        // Subscribe to location updates
+        await subscriber.pSubscribe('route:*:locations', (message, channel) => {
+            try {
+                const routeName = channel.split(':')[1];
+                const data = typeof message === 'string' ? JSON.parse(message) : message;
+                console.log(`📡 Broadcasting location to route ${routeName}:`, data);
+                console.log(`📊 Subscribers for route ${routeName}:`, io.sockets.adapter.rooms.get(`route:${routeName}`)?.size || 0);
+                io.to(`route:${routeName}`).emit('location_update', data);
+            } catch (error) {
+                console.error('Error broadcasting location update:', error);
+            }
         });
 
-        await redisClient.subscribe('route:*:notifications', (message) => {
-            const routeName = message.channel.split(':')[1];
-            io.to(`route:${routeName}`).emit('notification', message.data);
+        // Subscribe to notifications
+        await subscriber.pSubscribe('route:*:notifications', (message, channel) => {
+            try {
+                const routeName = channel.split(':')[1];
+                const data = typeof message === 'string' ? JSON.parse(message) : message;
+                console.log(`🔔 Broadcasting notification to route ${routeName}:`, data);
+                console.log(`📊 Subscribers for route ${routeName}:`, io.sockets.adapter.rooms.get(`route:${routeName}`)?.size || 0);
+                io.to(`route:${routeName}`).emit('notification', data);
+            } catch (error) {
+                console.error('Error broadcasting notification:', error);
+            }
         });
 
         console.log('Redis subscriptions set up successfully');
