@@ -22,6 +22,7 @@ const captainAuthRoutes = require('./routes/captainAuthRoutes');
 const feedbackRoutes = require('./routes/feedbackRoutes');
 const captainComplaintRoutes = require('./routes/captainComplaintRoutes');
 const locationRoutes = require('./routes/locationRoutes');
+const attendanceRoutes = require('./routes/attendanceRoutes');
 
 const app = express();
 const server = http.createServer(app);
@@ -42,6 +43,9 @@ app.use(cors());
 app.use(express.json());
 app.use("/uploads", express.static("uploads"));
 
+// Make io available to routes
+app.set('socketio', io);
+
 // Route Handlers
 app.use('/api', statsRoutes);
 app.use('/api', contactRoutes);
@@ -57,11 +61,13 @@ app.use('/api/captains/complaints', captainComplaintRoutes);
 app.use('/api/captains', require('./routes/captainRoutes'));
 app.use("/api/admin", require("./routes/adminRoutes"));
 app.use('/api/location', locationRoutes);
+app.use('/api/attendance', attendanceRoutes);
 
 // WebSocket connection handling
 io.on('connection', (socket) => {
     console.log('New client connected:', socket.id);
 
+    // Route subscription for location updates
     socket.on('subscribe_route', (routeName) => {
         socket.join(`route:${routeName}`);
         console.log(`✅ Client ${socket.id} subscribed to route: ${routeName}`);
@@ -71,6 +77,28 @@ io.on('connection', (socket) => {
     socket.on('unsubscribe_route', (routeName) => {
         socket.leave(`route:${routeName}`);
         console.log(`Client ${socket.id} unsubscribed from route: ${routeName}`);
+    });
+
+    // Captain subscription for attendance updates
+    socket.on('subscribe_captain', (captainId) => {
+        socket.join(`captain:${captainId}`);
+        console.log(`✅ Captain ${captainId} subscribed for attendance updates`);
+    });
+
+    socket.on('unsubscribe_captain', (captainId) => {
+        socket.leave(`captain:${captainId}`);
+        console.log(`Captain ${captainId} unsubscribed from attendance updates`);
+    });
+
+    // Admin dashboard subscription
+    socket.on('subscribe_admin', () => {
+        socket.join('admin_dashboard');
+        console.log(`✅ Admin dashboard subscribed`);
+    });
+
+    socket.on('unsubscribe_admin', () => {
+        socket.leave('admin_dashboard');
+        console.log(`Admin dashboard unsubscribed`);
     });
 
     socket.on('captain_location_update', async (data) => {
@@ -138,6 +166,10 @@ io.on('connection', (socket) => {
                 io.to(`route:${captain.route_name}`).emit('ride_ended', rideEndData);
                 console.log(`🛑 Ride end notification broadcasted to route: ${captain.route_name} (${io.sockets.adapter.rooms.get(`route:${captain.route_name}`)?.size || 0} subscribers)`);
                 console.log(`📍 Ride end data:`, rideEndData);
+
+                // Also end any active boarding session
+                const attendanceService = require('./services/attendanceService');
+                await attendanceService.endBoardingSession(normalizedCaptainId, captain.route_name);
             }
         } catch (error) {
             console.error('❌ Error processing captain ride end:', error);

@@ -57,6 +57,8 @@ model captains {
   current_route           String?              @db.VarChar(100)
   captain_complaints      captain_complaints[]
   routes                  routes?              @relation(fields: [route_name], references: [route_name], onDelete: NoAction, onUpdate: NoAction, map: "captains_ibfk_1")
+  attendance_logs         attendance_logs[]
+  boarding_sessions       boarding_sessions[]
 
   @@index([route_name], map: "route_name")
 }
@@ -92,11 +94,15 @@ model invoices {
 }
 
 model routes {
-  id         Int        @id @default(autoincrement())
-  route_name String     @unique(map: "route_name") @db.VarChar(100)
-  created_at DateTime?  @default(now()) @db.Timestamp(0)
-  captains   captains[]
-  stops      stops[]
+  id              Int        @id @default(autoincrement())
+  route_name      String     @unique(map: "route_name") @db.VarChar(100)
+  qr_code         String?    @db.Text
+  qr_generated_at DateTime?  @db.Timestamp(0)
+  created_at      DateTime?  @default(now()) @db.Timestamp(0)
+  captains        captains[]
+  stops           stops[]
+  attendance_logs attendance_logs[]
+  boarding_sessions boarding_sessions[]
 }
 
 model stops {
@@ -138,6 +144,7 @@ model students {
   created_at          DateTime?          @default(now()) @db.Timestamp(0)
   invoices            invoices[]
   student_feedback    student_feedback[]
+  attendance_logs     attendance_logs[]
 }
 
 enum captains_status {
@@ -148,4 +155,49 @@ enum captains_status {
 enum buses_status {
   active
   inactive
+}
+
+model attendance_logs {
+  id              Int       @id @default(autoincrement())
+  student_id      Int
+  route_name      String    @db.VarChar(100)
+  captain_id      Int
+  scan_timestamp  DateTime  @default(now()) @db.Timestamp(0)
+  qr_code_data    Json?
+  location_lat    Decimal?  @db.Decimal(10, 7)
+  location_lng    Decimal?  @db.Decimal(10, 7)
+  session_id      String?   @db.VarChar(50)
+  scan_type       String    @default("boarding") @db.VarChar(20) // boarding, alighting
+  is_valid        Boolean   @default(true)
+  created_at      DateTime  @default(now()) @db.Timestamp(0)
+  
+  student         students  @relation(fields: [student_id], references: [id], onDelete: Cascade)
+  captain         captains  @relation(fields: [captain_id], references: [id], onDelete: Cascade)
+  route           routes    @relation(fields: [route_name], references: [route_name], onDelete: Cascade)
+
+  @@index([student_id], map: "attendance_logs_student_id")
+  @@index([captain_id], map: "attendance_logs_captain_id")
+  @@index([route_name], map: "attendance_logs_route_name")
+  @@index([scan_timestamp], map: "attendance_logs_scan_timestamp")
+  @@index([session_id], map: "attendance_logs_session_id")
+}
+
+model boarding_sessions {
+  id               Int       @id @default(autoincrement())
+  session_id       String    @unique @db.VarChar(50)
+  captain_id       Int
+  route_name       String    @db.VarChar(100)
+  session_start    DateTime  @default(now()) @db.Timestamp(0)
+  session_end      DateTime? @db.Timestamp(0)
+  students_onboard Int       @default(0)
+  is_active        Boolean   @default(true)
+  created_at       DateTime  @default(now()) @db.Timestamp(0)
+  
+  captain          captains  @relation(fields: [captain_id], references: [id], onDelete: Cascade)
+  route            routes    @relation(fields: [route_name], references: [route_name], onDelete: Cascade)
+
+  @@index([captain_id], map: "boarding_sessions_captain_id")
+  @@index([route_name], map: "boarding_sessions_route_name")
+  @@index([session_id], map: "boarding_sessions_session_id")
+  @@index([is_active], map: "boarding_sessions_is_active")
 }

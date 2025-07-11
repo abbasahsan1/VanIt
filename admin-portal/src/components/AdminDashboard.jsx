@@ -8,7 +8,8 @@ import {
   FaMapPin, 
   FaUserCircle, 
   FaExclamationTriangle,
-  FaSatellite
+  FaSatellite,
+  FaQrcode
 } from "react-icons/fa";
 import axios from "axios";
 
@@ -158,6 +159,15 @@ const AdminDashboard = () => {
                 <p className="text-blue-100 text-sm">View feedback</p>
               </div>
               <FaHeadset className="text-white text-3xl" />
+            </Link>
+
+            {/* Card: Attendance Management */}
+            <Link to="/attendance-management" className="bg-[#FF6B35] p-6 rounded-lg shadow-lg flex justify-between items-center hover:bg-[#E5531A] transition-colors">
+              <div>
+                <h2 className="text-xl font-bold text-white">Attendance Management</h2>
+                <p className="text-orange-100 text-sm">QR codes & reports</p>
+              </div>
+              <FaQrcode className="text-white text-3xl" />
             </Link>
 
           </div>

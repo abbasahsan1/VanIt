@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { FaBars, FaArrowLeft, FaBell, FaExclamationTriangle, FaUserCircle, FaQrcode, FaRobot, FaHome, FaClipboardList, FaCommentDots, FaMoneyBill, FaMapMarkedAlt, FaRegEnvelope, FaPlay, FaStop } from 'react-icons/fa';
 import { Link, useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import CaptainAttendancePanel from './CaptainAttendancePanel';
 
 const CaptainPortal = () => {
   const navigate = useNavigate();
@@ -440,6 +441,14 @@ const CaptainPortal = () => {
           </div>
         </div>
       )}
+
+      {/* Attendance Management Panel */}
+      {/* <div className="p-8">
+        <CaptainAttendancePanel 
+          captainId={captainId} 
+          routeName={routeName} 
+        />
+      </div> */}
 
       <div className="fixed bottom-4 right-4">
         <FaRobot className="text-6xl text-blue-600 cursor-pointer" title="Chatbot" />

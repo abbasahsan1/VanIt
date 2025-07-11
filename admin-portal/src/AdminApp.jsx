@@ -15,6 +15,7 @@ import DeleteStudent from "./components/DeleteStudent";
 import EditCaptain from "./components/EditCaptain";
 import DeleteCaptain from "./components/DeleteCaptain";
 import RouteMonitor from "./components/RouteMonitor";  // GPS Route Monitor
+import AdminAttendanceManager from "./components/AdminAttendanceManager";
 
 function AdminApp() {
   return (
@@ -144,6 +145,16 @@ function AdminApp() {
           element={
             <PrivateAdminRoute>
               <DeleteStudent/>
+            </PrivateAdminRoute>
+          }
+        />
+
+        {/* Attendance Management Route */}
+        <Route
+          path="/attendance-management"
+          element={
+            <PrivateAdminRoute>
+              <AdminAttendanceManager />
             </PrivateAdminRoute>
           }
         />

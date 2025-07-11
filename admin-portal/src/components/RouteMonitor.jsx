@@ -9,7 +9,8 @@ import {
   FaBus, 
   FaClock,
   FaMapPin,
-  FaUsers
+  FaUsers,
+  FaSync
 } from 'react-icons/fa';
 
 const RouteMonitor = () => {
@@ -19,6 +20,8 @@ const RouteMonitor = () => {
   const [captainLocations, setCaptainLocations] = useState([]);
   const [socket, setSocket] = useState(null);
   const [isConnected, setIsConnected] = useState(false);
+  const [activeSessions, setActiveSessions] = useState([]);
+  const [loading, setLoading] = useState(false);
   const mapRef = useRef(null);
   const markersRef = useRef({});
 
@@ -38,6 +41,18 @@ const RouteMonitor = () => {
     newSocket.on('location_update', (data) => {
       console.log('Received location update:', data);
       updateCaptainLocation(data);
+    });
+
+    // Listen for attendance updates to get real student counts
+    newSocket.on('attendance_update', (data) => {
+      console.log('Received attendance update:', data);
+      updateStudentCount(data);
+    });
+
+    // Listen for session updates
+    newSocket.on('session_ended', (data) => {
+      console.log('Session ended:', data);
+      fetchActiveSessions();
     });
 
     setSocket(newSocket);
@@ -66,24 +81,45 @@ const RouteMonitor = () => {
     fetchRoutes();
   }, []);
 
+  const fetchActiveSessions = async () => {
+    try {
+      const response = await axios.get('http://localhost:5000/api/attendance/active-sessions');
+      if (response.data.success) {
+        setActiveSessions(response.data.data);
+      }
+    } catch (error) {
+      console.error('Error fetching active sessions:', error);
+    }
+  };
+
   const handleRouteChange = async (routeName) => {
     if (selectedRoute && socket) {
       socket.emit('unsubscribe_route', selectedRoute);
     }
 
     setSelectedRoute(routeName);
+    setLoading(true);
     
     if (routeName && socket) {
       socket.emit('subscribe_route', routeName);
       
       try {
-        const response = await axios.get(`http://localhost:5000/api/location/route/${encodeURIComponent(routeName)}/locations`);
-        setCaptainLocations(response.data);
-        initializeMap(response.data);
+        // Fetch captain locations
+        const locResponse = await axios.get(`http://localhost:5000/api/location/route/${encodeURIComponent(routeName)}/locations`);
+        setCaptainLocations(locResponse.data);
+        
+        // Fetch active sessions for this route
+        const sessResponse = await axios.get(`http://localhost:5000/api/attendance/active-sessions?routeName=${encodeURIComponent(routeName)}`);
+        if (sessResponse.data.success) {
+          setActiveSessions(sessResponse.data.data);
+        }
+        
+        initializeMap(locResponse.data);
       } catch (error) {
-        console.error('Error fetching route locations:', error);
+        console.error('Error fetching route data:', error);
       }
     }
+    setLoading(false);
   };
 
   const updateCaptainLocation = (locationData) => {
@@ -95,6 +131,13 @@ const RouteMonitor = () => {
     if (mapRef.current && markersRef.current[locationData.captainId]) {
       const marker = markersRef.current[locationData.captainId];
       marker.setLatLng([locationData.latitude, locationData.longitude]);
+    }
+  };
+
+  const updateStudentCount = (attendanceData) => {
+    // Update student count for the relevant captain/route
+    if (attendanceData.route_name === selectedRoute) {
+      fetchActiveSessions(); // Refresh session data to get updated counts
     }
   };
 
@@ -132,8 +175,15 @@ const RouteMonitor = () => {
     });
   };
 
-  const getDistanceFromStop = (captainLocation, stopName) => {
-    return (Math.random() * 5).toFixed(1);
+  const getStudentCountForCaptain = (captainId) => {
+    const session = activeSessions.find(s => s.captain_id === captainId);
+    return session ? session.students_onboard || 0 : 0;
+  };
+
+  const refreshData = () => {
+    if (selectedRoute) {
+      handleRouteChange(selectedRoute);
+    }
   };
 
   return (
@@ -173,9 +223,19 @@ const RouteMonitor = () => {
           </div>
 
           <div className="mb-6">
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Select Route to Monitor
-            </label>
+            <div className="flex justify-between items-center mb-2">
+              <label className="block text-sm font-medium text-gray-700">
+                Select Route to Monitor
+              </label>
+              <button
+                onClick={refreshData}
+                disabled={loading}
+                className="flex items-center px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+              >
+                <FaSync className={`mr-1 ${loading ? 'animate-spin' : ''}`} />
+                Refresh
+              </button>
+            </div>
             <select
               value={selectedRoute}
               onChange={(e) => handleRouteChange(e.target.value)}
@@ -256,7 +316,7 @@ const RouteMonitor = () => {
                           </div>
                           <div className="flex items-center space-x-2 text-sm text-gray-600 mt-1">
                             <FaUsers className="text-purple-500" />
-                            <span>~12 students on route</span>
+                            <span>{getStudentCountForCaptain(captain.captainId)} students onboard</span>
                           </div>
                         </div>
                       </div>
