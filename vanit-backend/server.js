@@ -111,6 +111,39 @@ io.on('connection', (socket) => {
         }
     });
 
+    socket.on('captain_ride_ended', async (data) => {
+        const { captainId, routeName } = data;
+        const normalizedCaptainId = parseInt(captainId);
+        console.log(`🛑 Captain ${normalizedCaptainId} ended ride for route: ${routeName}`);
+        
+        try {
+            // Get captain details
+            const pool = require('./config/db');
+            const [captainData] = await pool.query(
+                'SELECT first_name, last_name, route_name FROM captains WHERE id = ?',
+                [normalizedCaptainId]
+            );
+            
+            if (captainData.length > 0) {
+                const captain = captainData[0];
+                const rideEndData = {
+                    captainId: normalizedCaptainId,
+                    captainName: `${captain.first_name} ${captain.last_name}`,
+                    routeName: captain.route_name,
+                    timestamp: new Date().toISOString(),
+                    message: `🚍 Ride ended! Captain ${captain.first_name} ${captain.last_name} has stopped the bus service.`
+                };
+                
+                // Broadcast ride end notification to all route subscribers
+                io.to(`route:${captain.route_name}`).emit('ride_ended', rideEndData);
+                console.log(`🛑 Ride end notification broadcasted to route: ${captain.route_name} (${io.sockets.adapter.rooms.get(`route:${captain.route_name}`)?.size || 0} subscribers)`);
+                console.log(`📍 Ride end data:`, rideEndData);
+            }
+        } catch (error) {
+            console.error('❌ Error processing captain ride end:', error);
+        }
+    });
+
     socket.on('disconnect', () => {
         console.log('Client disconnected:', socket.id);
     });

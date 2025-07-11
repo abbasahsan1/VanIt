@@ -322,6 +322,21 @@ const CaptainGPS = () => {
     try {
       console.log('🛑 Stopping GPS tracking...');
       
+      // Send ride end notification BEFORE clearing intervals and stopping tracking
+      if (captainId && socket && socket.connected && routeName) {
+        try {
+          console.log('📡 Sending ride end notification to students...');
+          const rideEndData = {
+            captainId,
+            routeName
+          };
+          socket.emit('captain_ride_ended', rideEndData);
+          console.log('✅ Ride end notification sent via WebSocket');
+        } catch (error) {
+          console.error('❌ Error sending ride end notification:', error);
+        }
+      }
+      
       // Clear interval first
       if (locationIntervalRef.current) {
         clearInterval(locationIntervalRef.current);
@@ -345,7 +360,7 @@ const CaptainGPS = () => {
           });
           console.log('✅ Ride stopped successfully');
           
-          alert('Ride stopped successfully! Redirecting to portal...');
+          alert('Ride stopped successfully! Students have been notified. Redirecting to portal...');
           navigate('/captain/home');
         } catch (error) {
           console.error('❌ Error stopping tracking on backend:', error);

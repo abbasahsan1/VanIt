@@ -23,6 +23,8 @@ const StudentBusTracking = () => {
   const [lastNotification, setLastNotification] = useState(null);
   const [showNotification, setShowNotification] = useState(false);
   const [error, setError] = useState(null);
+  const [rideEnded, setRideEnded] = useState(false);
+  const [rideEndMessage, setRideEndMessage] = useState('');
 
   useEffect(() => {
     const newSocket = io('http://localhost:5000');
@@ -57,6 +59,17 @@ const StudentBusTracking = () => {
       setTimeout(() => {
         setShowNotification(false);
       }, 10000);
+    });
+
+    newSocket.on('ride_ended', (data) => {
+      console.log('🛑 Received ride end notification:', data);
+      setRideEnded(true);
+      setRideEndMessage(data.message || 'The ride has ended.');
+      setCaptainLocation(null); // Clear location when ride ends
+      setLastNotification(null); // Clear notifications
+      
+      // Show a more prominent notification
+      alert(`🛑 ${data.message || 'The ride has ended.'}`);
     });
 
     newSocket.on('error', (error) => {
@@ -231,12 +244,44 @@ const StudentBusTracking = () => {
           </div>
         )}
 
+        {rideEnded && (
+          <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-6">
+            <div className="flex items-center">
+              <FaExclamationTriangle className="mr-2 text-xl" />
+              <div className="flex-grow">
+                <h3 className="font-semibold text-lg">🛑 Ride Has Ended</h3>
+                <p className="text-sm mt-1">{rideEndMessage}</p>
+                <div className="mt-3 space-x-2">
+                  <button
+                    onClick={() => navigate('/student/home')}
+                    className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors duration-200 text-sm"
+                  >
+                    Return to Portal
+                  </button>
+                  <button
+                    onClick={() => setRideEnded(false)}
+                    className="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 transition-colors duration-200 text-sm"
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
           <h2 className="text-xl font-semibold text-gray-800 mb-4 flex items-center">
             <FaBus className="mr-2" /> Bus Status
           </h2>
           
-          {captainLocation ? (
+          {rideEnded ? (
+            <div className="text-center py-8">
+              <FaExclamationTriangle className="text-4xl text-red-500 mx-auto mb-2" />
+              <p className="text-red-600 font-semibold text-lg">🛑 Ride has ended</p>
+              <p className="text-sm text-gray-500 mt-2">The captain has stopped the bus service</p>
+            </div>
+          ) : captainLocation ? (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="bg-blue-50 p-4 rounded-lg">
                 <h3 className="font-semibold text-gray-800 mb-3 flex items-center">
@@ -333,7 +378,18 @@ const StudentBusTracking = () => {
             <FaMapMarkedAlt className="mr-2" /> Live Map
           </h2>
           <div className="w-full h-80 bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg flex items-center justify-center border-2 border-dashed border-blue-300 relative overflow-hidden">
-            {captainLocation ? (
+            {rideEnded ? (
+              <div className="text-center z-10">
+                <div className="bg-white rounded-full p-4 shadow-lg mb-4 inline-block">
+                  <FaExclamationTriangle className="text-5xl text-red-500" />
+                </div>
+                <h3 className="text-xl font-semibold text-red-800 mb-2">🛑 Ride Ended</h3>
+                <p className="text-gray-700 mb-3">The bus service has been stopped</p>
+                <div className="bg-white rounded-lg p-4 shadow-md max-w-md mx-auto">
+                  <p className="text-gray-600 text-sm">No further location updates will be received</p>
+                </div>
+              </div>
+            ) : captainLocation ? (
               <div className="text-center z-10">
                 <div className="bg-white rounded-full p-4 shadow-lg mb-4 inline-block">
                   <FaMapMarkedAlt className="text-5xl text-blue-500" />
