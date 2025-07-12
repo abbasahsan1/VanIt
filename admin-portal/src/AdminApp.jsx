@@ -16,6 +16,7 @@ import EditCaptain from "./components/EditCaptain";
 import DeleteCaptain from "./components/DeleteCaptain";
 import RouteMonitor from "./components/RouteMonitor";  // GPS Route Monitor
 import AdminAttendanceManager from "./components/AdminAttendanceManager";
+import EmergencyManager from "./components/EmergencyManager";  // Emergency Alert Management
 
 function AdminApp() {
   return (
@@ -155,6 +156,16 @@ function AdminApp() {
           element={
             <PrivateAdminRoute>
               <AdminAttendanceManager />
+            </PrivateAdminRoute>
+          }
+        />
+
+        {/* Emergency Alert Management Route */}
+        <Route
+          path="/emergency-management"
+          element={
+            <PrivateAdminRoute>
+              <EmergencyManager />
             </PrivateAdminRoute>
           }
         />

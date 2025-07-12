@@ -73,13 +73,25 @@ model contact_messages {
 
 model emergency_alerts {
   id                  Int       @id @default(autoincrement())
+  user_type           String    @db.VarChar(20) // 'student' or 'captain'
+  user_id             Int? // Student ID or Captain ID
   first_name          String    @db.VarChar(255)
   last_name           String    @db.VarChar(255)
-  registration_number String    @db.VarChar(50)
+  registration_number String?   @db.VarChar(50) // Only for students
   phone               String    @db.VarChar(20)
   route_name          String    @db.VarChar(100)
-  stop_name           String    @db.VarChar(100)
+  stop_name           String?   @db.VarChar(100) // May be null for captains
+  latitude            Decimal?  @db.Decimal(10, 7)
+  longitude           Decimal?  @db.Decimal(10, 7)
+  emergency_type      String    @default("general") @db.VarChar(50) // 'medical', 'security', 'mechanical', 'general'
+  message             String?   @db.Text // Optional custom message
+  status              String    @default("pending") @db.VarChar(20) // 'pending', 'acknowledged', 'resolved'
+  acknowledged_by     String?   @db.VarChar(100) // Admin who acknowledged
+  acknowledged_at     DateTime? @db.Timestamp(0)
+  resolution_notes    String?   @db.Text // Admin notes on resolution
+  priority_level      String    @default("high") @db.VarChar(20) // 'low', 'medium', 'high', 'critical'
   timestamp           DateTime? @default(now()) @db.Timestamp(0)
+  resolved_at         DateTime? @db.Timestamp(0)
 }
 
 model invoices {

@@ -34,7 +34,20 @@ const AdminDashboard = () => {
     
     newSocket.on('connect', () => {
       console.log('✅ Admin Dashboard WebSocket connected');
-      newSocket.emit('join_admin_dashboard');
+      newSocket.emit('subscribe_admin');
+    });
+
+    newSocket.on('emergency_alert', (data) => {
+      console.log('🚨 Real-time emergency alert received:', data);
+      setEmergencyAlerts(prevAlerts => [data.data, ...prevAlerts.slice(0, 4)]); // Keep latest 5
+      
+      // Show browser notification
+      if (Notification.permission === 'granted') {
+        new Notification('🚨 Emergency Alert', {
+          body: `${data.data.user_type.toUpperCase()}: ${data.data.first_name} ${data.data.last_name} - ${data.data.emergency_type}`,
+          icon: '/favicon.ico'
+        });
+      }
     });
 
     newSocket.on('dashboard_stats_update', (updatedStats) => {
@@ -107,10 +120,13 @@ const AdminDashboard = () => {
   // ✅ Fetch Emergency Alerts from Backend
   const fetchEmergencyAlerts = async () => {
     try {
-      const response = await axios.get("http://localhost:5000/api/admin/emergency-alerts");
-      setEmergencyAlerts(response.data);
+      const response = await axios.get("http://localhost:5000/api/emergency/admin/alerts?status=pending&limit=5");
+      if (response.data.success) {
+        setEmergencyAlerts(response.data.data);
+      }
     } catch (error) {
       console.error("❌ Error fetching alerts:", error);
+      setEmergencyAlerts([]);
     }
   };
 
@@ -119,8 +135,16 @@ const AdminDashboard = () => {
     fetchDashboardStats();
     fetchEmergencyAlerts();
     
+    // Request notification permission
+    if (Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
+    
     // Set up periodic refresh every 30 seconds
-    const interval = setInterval(fetchDashboardStats, 30000);
+    const interval = setInterval(() => {
+      fetchDashboardStats();
+      fetchEmergencyAlerts();
+    }, 30000);
     
     return () => clearInterval(interval);
   }, []);
@@ -153,6 +177,7 @@ const AdminDashboard = () => {
           <Link to="/captain-list" className="hover:text-blue-800">Captain List</Link>
           <Link to="/student-list" className="hover:text-blue-800">Students List</Link>
           <Link to="/route-monitor" className="hover:text-blue-800">Route Monitor</Link>
+          <Link to="/emergency-management" className="hover:text-red-600 text-red-500 font-bold">🚨 Emergency</Link>
           <button onClick={handleLogout} className="hover:text-blue-800">Logout</button>
         </div>
         <div className="w-10 h-10 bg-gray-300 rounded-full flex items-center justify-center">
@@ -162,23 +187,35 @@ const AdminDashboard = () => {
 
       {/* 🚨 Emergency Alerts Popup */}
       {emergencyAlerts.length > 0 && (
-        <div className="fixed top-10 right-10 bg-red-600 text-white p-4 rounded-lg shadow-lg">
-          <h2 className="text-lg font-bold flex items-center">
-            <FaExclamationTriangle className="mr-2" /> Emergency Alerts
+        <div className="fixed top-10 right-10 bg-red-600 text-white p-4 rounded-lg shadow-lg max-w-sm">
+          <h2 className="text-lg font-bold flex items-center mb-3">
+            <FaExclamationTriangle className="mr-2" /> Emergency Alerts ({emergencyAlerts.length})
           </h2>
-          {emergencyAlerts.map((alert, index) => (
+          {emergencyAlerts.slice(0, 3).map((alert, index) => (
             <div key={index} className="mt-2 p-2 bg-red-500 rounded">
               <p><strong>Name:</strong> {alert.first_name} {alert.last_name}</p>
-              <p><strong>Reg #:</strong> {alert.registration_number}</p>
-              <p><strong>Location:</strong> {alert.location}</p>
+              <p><strong>Type:</strong> {alert.user_type}</p>
+              <p><strong>Route:</strong> {alert.route_name}</p>
+              <p><strong>Priority:</strong> {alert.priority_level?.toUpperCase()}</p>
               <button 
-                className="bg-gray-800 text-white px-2 py-1 rounded mt-2"
+                className="bg-gray-800 text-white px-2 py-1 rounded mt-2 mr-2"
                 onClick={() => removeAlert(index)}
               >
                 Dismiss
               </button>
             </div>
           ))}
+          {emergencyAlerts.length > 3 && (
+            <p className="text-sm text-red-200 mt-2">... and {emergencyAlerts.length - 3} more alerts</p>
+          )}
+          <div className="mt-3 pt-3 border-t border-red-400">
+            <Link 
+              to="/emergency-management"
+              className="block w-full text-center bg-white text-red-600 px-3 py-2 rounded font-semibold hover:bg-gray-100 transition-colors"
+            >
+              Manage All Alerts
+            </Link>
+          </div>
         </div>
       )}
 
@@ -280,6 +317,15 @@ const AdminDashboard = () => {
                 <p className="text-orange-100 text-sm">QR codes & reports</p>
               </div>
               <FaQrcode className="text-white text-3xl" />
+            </Link>
+
+            {/* Card: Emergency Management */}
+            <Link to="/emergency-management" className="bg-[#DC2626] p-6 rounded-lg shadow-lg flex justify-between items-center hover:bg-[#B91C1C] transition-colors">
+              <div>
+                <h2 className="text-xl font-bold text-white">🚨 Emergency Management</h2>
+                <p className="text-red-100 text-sm">Monitor & respond to SOS alerts</p>
+              </div>
+              <FaExclamationTriangle className="text-white text-3xl" />
             </Link>
 
           </div>

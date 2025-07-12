@@ -183,5 +183,36 @@ router.post('/check-phone-token', async (req, res) => {
     }
   });
 
+  // Captain profile endpoint for SOS functionality
+  router.get('/profile/:phone', async (req, res) => {
+    const { phone } = req.params;
+  
+    try {
+      const [captains] = await pool.query(
+        'SELECT id, first_name, last_name, phone, route_name, alternate_phone FROM captains WHERE phone = ?', 
+        [phone]
+      );
+      
+      if (captains.length === 0) {
+        return res.status(404).json({ 
+          success: false, 
+          message: 'Captain not found' 
+        });
+      }
+      
+      res.status(200).json({ 
+        success: true, 
+        data: captains[0] 
+      });
+      
+    } catch (err) {
+      console.error("Error fetching captain profile:", err);
+      res.status(500).json({ 
+        success: false, 
+        message: 'Error fetching captain profile' 
+      });
+    }
+  });
+
 module.exports = router;
 

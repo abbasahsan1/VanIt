@@ -28,7 +28,7 @@ const app = express();
 const server = http.createServer(app);
 const io = socketIo(server, {
     cors: {
-        origin: ["http://localhost:3000", "http://localhost:5173", "http://localhost:4173"],
+        origin: ["http://localhost:3000", "http://localhost:5173", "http://localhost:4173", "http://localhost:5174"],
         methods: ["GET", "POST"]
     }
 });
@@ -53,7 +53,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api', studentRoutes);
 app.use('/api', routesRouter);
 app.use('/api/admin/student-management', adminStudentCaptainRoutes);
-app.use("/api/emergency", emergencyRoutes);
+app.use("/api/emergency", emergencyRoutes);  // Updated emergency route path
 app.use("/api/bus-tracking", busTrackingRoutes);
 app.use('/api/auth/captains', captainAuthRoutes);
 app.use('/api/feedback', feedbackRoutes);
@@ -93,12 +93,38 @@ io.on('connection', (socket) => {
     // Admin dashboard subscription
     socket.on('subscribe_admin', () => {
         socket.join('admin_dashboard');
-        console.log(`✅ Admin dashboard subscribed`);
+        console.log(`✅ Admin dashboard subscribed for real-time updates`);
     });
 
     socket.on('unsubscribe_admin', () => {
         socket.leave('admin_dashboard');
-        console.log(`Admin dashboard unsubscribed`);
+        console.log(`Admin dashboard unsubscribed from real-time updates`);
+    });
+
+    // SOS/Emergency alert subscription
+    socket.on('subscribe_emergency', () => {
+        socket.join('emergency_alerts');
+        console.log(`✅ Client subscribed to emergency alerts`);
+    });
+
+    socket.on('unsubscribe_emergency', () => {
+        socket.leave('emergency_alerts');
+        console.log(`Client unsubscribed from emergency alerts`);
+    });
+
+    // User-specific SOS tracking subscription
+    socket.on('subscribe_user_sos', (data) => {
+        const { userType, userId } = data;
+        const roomName = `user_sos:${userType}:${userId}`;
+        socket.join(roomName);
+        console.log(`✅ ${userType} ${userId} subscribed for SOS updates in room: ${roomName}`);
+    });
+
+    socket.on('unsubscribe_user_sos', (data) => {
+        const { userType, userId } = data;
+        const roomName = `user_sos:${userType}:${userId}`;
+        socket.leave(roomName);
+        console.log(`${userType} ${userId} unsubscribed from SOS updates`);
     });
 
     socket.on('captain_location_update', async (data) => {

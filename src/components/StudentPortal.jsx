@@ -1,17 +1,23 @@
 import React, { useState, useEffect } from 'react';
 import { FaBars, FaBell, FaUserCircle, FaSignOutAlt, FaArrowLeft, FaRobot, FaQrcode, FaExclamationTriangle, FaMapMarkedAlt, FaHistory } from 'react-icons/fa';
 import { Link, useNavigate } from 'react-router-dom';
+import { io } from 'socket.io-client';
 import axios from "axios";
 import QRScanner from './QRScanner';
 import AttendanceHistory from './AttendanceHistory';
+import SOSButton from './SOSButton';
+import SOSTracker from './SOSTracker';
+import NotificationManager from './NotificationManager';
 
 const StudentPortal = () => {
   const [showSidebar, setShowSidebar] = useState(false);
   const [showProfileDropdown, setShowProfileDropdown] = useState(false);
   const [showQRScanner, setShowQRScanner] = useState(false);
   const [showAttendanceHistory, setShowAttendanceHistory] = useState(false);
+  const [showSOSTracker, setShowSOSTracker] = useState(false);
   const [activeTab, setActiveTab] = useState('dashboard');
   const navigate = useNavigate();
+  const [socket, setSocket] = useState(null);
   const [studentData, setStudentData] = useState({ first_name: '', registration_number: '', id: null });
 
   const toggleSidebar = () => {
@@ -30,6 +36,10 @@ const StudentPortal = () => {
   };
 
   useEffect(() => {
+    // Initialize socket connection
+    const newSocket = io('http://localhost:5000');
+    setSocket(newSocket);
+
     const fetchStudentData = async () => {
       const email = localStorage.getItem("studentEmail");
       if (!email) return;
@@ -40,10 +50,14 @@ const StudentPortal = () => {
           setStudentData({
             id: res.data.id,
             first_name: res.data.first_name,
+            last_name: res.data.last_name || '',
             registration_number: res.data.registration_number,
             route_name: res.data.route_name,
-            stop_name: res.data.stop_name
+            stop_name: res.data.stop_name,
+            phone: res.data.phone || '',
+            emergency_contact: res.data.emergency_contact || ''
           });
+          console.log('✅ Student data loaded for SOS:', res.data);
         }
       } catch (err) {
         console.error("Error fetching student data:", err);
@@ -51,6 +65,12 @@ const StudentPortal = () => {
     };
   
     fetchStudentData();
+
+    return () => {
+      if (newSocket) {
+        newSocket.disconnect();
+      }
+    };
   }, []);
 
   return (
@@ -68,7 +88,25 @@ const StudentPortal = () => {
             <FaMapMarkedAlt className="text-xl text-blue-300 cursor-pointer hover:text-white transition-colors duration-200" title="Track My Bus" />
           </Link>
 
-          <FaExclamationTriangle className="text-xl text-red-600 cursor-pointer hover:text-red-400" title="SOS" />
+          {/* SOS Button */}
+          <SOSButton 
+            userType="student"
+            userId={studentData.id}
+            userData={studentData}
+            onAlertSent={(alertData) => {
+              console.log('SOS Alert sent from Student Portal:', alertData);
+              // Optionally show a notification or update UI
+            }}
+          />
+
+          {/* SOS Tracker Button */}
+          <button
+            onClick={() => setShowSOSTracker(true)}
+            className="text-xl text-blue-300 cursor-pointer hover:text-white transition-colors duration-200"
+            title="View My SOS Alerts"
+          >
+            <FaHistory />
+          </button>
 
           <FaBell className="text-xl cursor-pointer hover:text-gray-300" />
 
@@ -283,6 +321,22 @@ const StudentPortal = () => {
           </div>
         )}
       </div>
+
+      {/* Notification Manager */}
+      <NotificationManager 
+        socket={socket}
+        userType="student"
+        userId={studentData.id}
+      />
+
+      {/* SOS Tracker Modal */}
+      {showSOSTracker && (
+        <SOSTracker 
+          userType="student"
+          userId={studentData.id}
+          onClose={() => setShowSOSTracker(false)}
+        />
+      )}
     </div>
   );
 };

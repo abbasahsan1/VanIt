@@ -4,6 +4,9 @@ import { Link, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { io } from 'socket.io-client';
 import CaptainAttendancePanel from './CaptainAttendancePanel';
+import SOSButton from './SOSButton';
+import SOSTracker from './SOSTracker';
+import NotificationManager from './NotificationManager';
 
 const CaptainPortal = () => {
   const navigate = useNavigate();
@@ -22,6 +25,38 @@ const CaptainPortal = () => {
   const [captainLocation, setCaptainLocation] = useState(null);
   const [captainId, setCaptainId] = useState(null);
   const [socket, setSocket] = useState(null);
+  const [showSOSTracker, setShowSOSTracker] = useState(false);
+  const [captainData, setCaptainData] = useState({
+    first_name: '',
+    last_name: '',
+    phone: '',
+    route_name: ''
+  });
+
+  // Fetch captain data for SOS functionality
+  const fetchCaptainData = async (phone) => {
+    try {
+      const response = await axios.get(`http://localhost:5000/api/auth/captains/profile/${phone}`);
+      if (response.data && response.data.success) {
+        setCaptainData({
+          first_name: response.data.data.first_name || '',
+          last_name: response.data.data.last_name || '',
+          phone: response.data.data.phone || phone,
+          route_name: response.data.data.route_name || ''
+        });
+        console.log('✅ Captain data loaded for SOS:', response.data.data);
+      }
+    } catch (error) {
+      console.error("Error fetching captain data:", error);
+      // Set minimal data from available sources
+      setCaptainData({
+        first_name: 'Captain',
+        last_name: '',
+        phone: phone,
+        route_name: routeName || ''
+      });
+    }
+  };
 
   useEffect(() => {
     // Initialize WebSocket connection for real-time updates
@@ -33,6 +68,10 @@ const CaptainPortal = () => {
       const storedPhone = localStorage.getItem('captainPhone');
       if (storedPhone) {
         setCaptainPhone(storedPhone);
+        
+        // Fetch captain data immediately when phone is available
+        fetchCaptainData(storedPhone);
+        
         axios.post("http://localhost:5000/api/auth/captains/check-phone", { phone: storedPhone })
           .then(res => {
             if (!res.data.hasPassword) {
@@ -340,7 +379,22 @@ const CaptainPortal = () => {
               </>
             )}
           </button>
-          <FaExclamationTriangle className="mx-4 cursor-pointer text-2xl" title="SOS" />
+          
+          {/* SOS Button */}
+          <SOSButton 
+            userType="captain"
+            userId={captainId}
+            userData={{
+              ...captainData,
+              route_name: routeName || captainData.route_name
+            }}
+            onAlertSent={(alertData) => {
+              console.log('SOS Alert sent from Captain Portal:', alertData);
+              // Optionally show a notification or update UI
+            }}
+            disabled={!captainId}
+          />
+
           <FaBell className="mx-4 cursor-pointer text-2xl" title="Notifications" />
           <div className="relative">
             <FaUserCircle
@@ -393,6 +447,14 @@ const CaptainPortal = () => {
             <li><Link to="/captain/gps" className="flex items-center text-lg text-blue-700 hover:underline"><FaMapMarkedAlt className="mr-2" /> GPS Tracking</Link></li>
             <li><Link to="/captain/notifications" className="flex items-center text-lg text-blue-700 hover:underline"><FaBell className="mr-2" /> Notifications</Link></li>
             <li><Link to="/captain/emergency" className="flex items-center text-lg text-blue-700 hover:underline"><FaExclamationTriangle className="mr-2" /> Emergency Button</Link></li>
+            <li>
+              <button 
+                onClick={() => setShowSOSTracker(true)}
+                className="flex items-center text-lg text-red-600 hover:underline w-full text-left"
+              >
+                <FaExclamationTriangle className="mr-2" /> Track SOS Alerts
+              </button>
+            </li>
             <li>
               <Link to="/captain/complaints" className="flex items-center text-lg text-blue-700 hover:underline">
                 <FaRegEnvelope className="mr-2" /> Complain Box
@@ -575,6 +637,31 @@ const CaptainPortal = () => {
             >
               Set Password
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Notification Manager */}
+      <NotificationManager 
+        socket={socket}
+        userType="captain"
+        userId={captainData.id}
+      />
+
+      {/* SOS Tracker Modal */}
+      {showSOSTracker && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-4xl w-full max-h-[80vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-2xl font-bold text-gray-800">SOS Alerts Tracker</h2>
+              <button
+                onClick={() => setShowSOSTracker(false)}
+                className="text-gray-500 hover:text-gray-700 text-2xl"
+              >
+                ×
+              </button>
+            </div>
+            <SOSTracker userType="captain" userId={captainData.id} />
           </div>
         </div>
       )}
