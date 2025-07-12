@@ -9,7 +9,7 @@ const AdminAttendanceManager = () => {
   const [pageLoading, setPageLoading] = useState(true);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [qrCode, setQrCode] = useState('');
+  const [qrCodeData, setQrCodeData] = useState(null);
   const [selectedRoute, setSelectedRoute] = useState('');
   const [routes, setRoutes] = useState([]);
   const [socket, setSocket] = useState(null);
@@ -24,6 +24,16 @@ const AdminAttendanceManager = () => {
   useEffect(() => {
     initializeData();
     setupSocket();
+    
+    // Set up automatic refresh every 10 seconds for real-time updates
+    const refreshInterval = setInterval(() => {
+      console.log('🔄 Auto-refreshing active sessions...');
+      fetchActiveSessions();
+    }, 10000);
+
+    return () => {
+      clearInterval(refreshInterval);
+    };
   }, []);
 
   const setupSocket = () => {
@@ -31,7 +41,7 @@ const AdminAttendanceManager = () => {
     
     newSocket.on('connect', () => {
       console.log('Admin connected to WebSocket');
-      newSocket.emit('join', 'admin_dashboard');
+      newSocket.emit('subscribe_admin');
     });
 
     newSocket.on('boarding_update', (data) => {
@@ -40,8 +50,20 @@ const AdminAttendanceManager = () => {
       fetchStats(); // Refresh stats
     });
 
+    newSocket.on('student_onboarded', (data) => {
+      console.log('Received student onboarded:', data);
+      fetchActiveSessions();
+      fetchStats();
+    });
+
     newSocket.on('session_ended', (data) => {
       console.log('Session ended:', data);
+      fetchActiveSessions();
+      fetchStats();
+    });
+
+    newSocket.on('attendance_update', (data) => {
+      console.log('Received attendance update:', data);
       fetchActiveSessions();
       fetchStats();
     });
@@ -98,12 +120,24 @@ const AdminAttendanceManager = () => {
     try {
       const response = await axios.get('http://localhost:5000/api/attendance/statistics');
       if (response.data.success) {
+        const totalRegistered = response.data.data.uniqueStudents || 0;
+        const totalAttended = response.data.data.totalScans || 0;
+        
+        // Calculate attendance rate properly: (Students who attended / Total registered) × 100
+        // Ensure it never exceeds 100%
+        let attendanceRate = 0;
+        if (totalRegistered > 0) {
+          attendanceRate = Math.min(100, Math.round((totalAttended / totalRegistered) * 100 * 100) / 100); // Round to 2 decimal places
+        }
+        
         setStats({
-          totalAttended: response.data.data.totalScansToday || 0,
-          totalRegistered: response.data.data.totalStudents || 0,
+          totalAttended: totalAttended,
+          totalRegistered: totalRegistered,
           activeSessions: response.data.data.activeSessions || 0,
-          attendanceRate: response.data.data.attendanceRate || 0
+          attendanceRate: attendanceRate
         });
+        
+        console.log(`📊 Updated stats - Attended: ${totalAttended}, Registered: ${totalRegistered}, Rate: ${attendanceRate}%`);
       }
     } catch (error) {
       console.warn('Stats loading failed:', error);
@@ -112,12 +146,26 @@ const AdminAttendanceManager = () => {
 
   const fetchActiveSessions = async () => {
     try {
-      const response = await axios.get('http://localhost:5000/api/attendance/active-sessions');
-      if (response.data.success) {
+      console.log('🔄 Fetching active sessions...');
+      const token = localStorage.getItem('adminToken');
+      const response = await axios.get('http://localhost:5000/api/admin/attendance/active-sessions', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      console.log('📊 Active sessions response:', response.data);
+      
+      if (response.data.success && Array.isArray(response.data.data)) {
         setActiveSessions(response.data.data);
+        console.log(`✅ Found ${response.data.data.length} active sessions:`, response.data.data);
+      } else {
+        console.warn('❌ Active sessions response format unexpected:', response.data);
+        setActiveSessions([]);
       }
     } catch (error) {
-      console.warn('Sessions loading failed:', error);
+      console.error('❌ Sessions loading failed:', error.response?.data || error.message);
+      setActiveSessions([]);
     }
   };
 
@@ -135,8 +183,7 @@ const AdminAttendanceManager = () => {
       );
       
       if (response.data.success) {
-        // Create a QR code data URL for display
-        setQrCode(`data:text/plain;base64,${btoa(response.data.data.qrData)}`);
+        setQrCodeData(response.data.data);
         alert('QR Code generated successfully!');
       }
     } catch (error) {
@@ -236,7 +283,7 @@ const AdminAttendanceManager = () => {
             </div>
             <div className="bg-white p-6 rounded-lg shadow">
               <h3 className="text-lg font-semibold text-gray-700 mb-2">Active Sessions</h3>
-              <p className="text-3xl font-bold text-orange-600">{stats.activeSessions}</p>
+              <p className="text-3xl font-bold text-orange-600">{activeSessions.length}</p>
             </div>
             <div className="bg-white p-6 rounded-lg shadow">
               <h3 className="text-lg font-semibent text-gray-700 mb-2">Attendance Rate</h3>
@@ -286,12 +333,44 @@ const AdminAttendanceManager = () => {
               )}
             </button>
             
-            {qrCode && (
+            {qrCodeData && (
               <div className="text-center mt-4">
                 <div className="bg-white p-4 border-2 border-dashed border-gray-300 rounded-lg inline-block">
-                  <FaQrcode className="text-6xl text-gray-600 mx-auto mb-2" />
-                  <p className="text-sm text-gray-600 mb-2">QR Code for {selectedRoute}</p>
+                  <img 
+                    src={qrCodeData.qrImage} 
+                    alt={`QR Code for ${qrCodeData.routeName}`}
+                    className="mx-auto mb-2"
+                    style={{ width: '200px', height: '200px' }}
+                  />
+                  <p className="text-sm text-gray-600 mb-2">QR Code for {qrCodeData.routeName}</p>
+                  <p className="text-xs text-gray-500 mb-1">Generated: {new Date(qrCodeData.generatedAt).toLocaleString()}</p>
                   <p className="text-xs text-gray-500">Students can scan this to mark attendance</p>
+                  <button
+                    onClick={async () => {
+                      try {
+                        const response = await axios.get(
+                          `http://localhost:5000/api/attendance/download-qr/${encodeURIComponent(qrCodeData.routeName)}`,
+                          { responseType: 'blob' }
+                        );
+                        
+                        const blob = new Blob([response.data], { type: 'image/png' });
+                        const url = window.URL.createObjectURL(blob);
+                        const link = document.createElement('a');
+                        link.href = url;
+                        link.download = `${qrCodeData.routeName}-qr-code.png`;
+                        document.body.appendChild(link);
+                        link.click();
+                        document.body.removeChild(link);
+                        window.URL.revokeObjectURL(url);
+                      } catch (error) {
+                        console.error('Error downloading QR code:', error);
+                        alert('Failed to download QR code');
+                      }
+                    }}
+                    className="mt-2 bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded text-sm"
+                  >
+                    Download QR Code
+                  </button>
                 </div>
               </div>
             )}

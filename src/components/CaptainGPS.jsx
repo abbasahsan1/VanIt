@@ -73,17 +73,54 @@ const CaptainGPS = () => {
             routeName: response.data.routeName,
             isActive: response.data.isActive
           });
-          
-          if (!isTracking && !autoStarted && socket && socket.connected) {
-            console.log('🚀 Auto-starting GPS tracking for captain...');
-            setAutoStarted(true);
-            // Add a delay to ensure socket connection is established
-            setTimeout(() => {
-              if (!isTracking) { // Double check to prevent duplicate starts
-                console.log('🎯 Triggering auto-start...');
-                startTracking();
+
+          // Check if captain is already tracking by querying the backend status
+          try {
+            const statusResponse = await axios.get(`http://localhost:5000/api/location/captain/${response.data.captainId}/status`);
+            if (statusResponse.data.isTracking) {
+              console.log('🔄 Captain is already tracking - restoring state');
+              setIsTracking(true);
+              setAutoStarted(true);
+              
+              // Get current location and start tracking
+              if (socket && socket.connected) {
+                setTimeout(() => {
+                  startTracking();
+                }, 1000);
               }
-            }, 3000); // Increased delay to ensure everything is ready
+            } else if (!isTracking && !autoStarted && socket && socket.connected) {
+              console.log('🚀 Auto-starting GPS tracking for captain...');
+              setAutoStarted(true);
+              setTimeout(() => {
+                if (!isTracking) {
+                  console.log('🎯 Triggering auto-start...');
+                  startTracking();
+                }
+              }, 3000);
+            }
+          } catch (statusError) {
+            console.warn('⚠️ Could not check tracking status, proceeding with auto-start');
+            if (!isTracking && !autoStarted && socket && socket.connected) {
+              console.log('🚀 Auto-starting GPS tracking for captain...');
+              setAutoStarted(true);
+              setTimeout(() => {
+                if (!isTracking) {
+                  console.log('🎯 Triggering auto-start...');
+                  startTracking();
+                }
+              }, 3000);
+            }
+          }
+
+          // Fetch students count for this route
+          try {
+            const studentsResponse = await axios.get(`http://localhost:5000/api/routes/${encodeURIComponent(response.data.routeName)}/students`);
+            if (studentsResponse.data.success) {
+              setStudentsCount(studentsResponse.data.data.length);
+              console.log(`📊 Found ${studentsResponse.data.data.length} students on route: ${response.data.routeName}`);
+            }
+          } catch (studentsError) {
+            console.warn('⚠️ Could not fetch students count:', studentsError);
           }
         }
       } catch (error) {
@@ -93,7 +130,7 @@ const CaptainGPS = () => {
     };
 
     fetchCaptainInfo();
-  }, [navigate]); // Removed dependencies to prevent re-runs
+  }, [navigate, socket]); // Added socket dependency
 
   const getCurrentLocation = () => {
     return new Promise((resolve, reject) => {

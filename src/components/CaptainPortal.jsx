@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { FaBars, FaArrowLeft, FaBell, FaExclamationTriangle, FaUserCircle, FaQrcode, FaRobot, FaHome, FaClipboardList, FaCommentDots, FaMoneyBill, FaMapMarkedAlt, FaRegEnvelope, FaPlay, FaStop } from 'react-icons/fa';
 import { Link, useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import { io } from 'socket.io-client';
 import CaptainAttendancePanel from './CaptainAttendancePanel';
 
 const CaptainPortal = () => {
@@ -20,9 +21,12 @@ const CaptainPortal = () => {
   const [routeError, setRouteError] = useState(null);
   const [captainLocation, setCaptainLocation] = useState(null);
   const [captainId, setCaptainId] = useState(null);
+  const [socket, setSocket] = useState(null);
 
   useEffect(() => {
-    setStudentsInRide(20);
+    // Initialize WebSocket connection for real-time updates
+    const newSocket = io('http://localhost:5000');
+    setSocket(newSocket);
 
     const token = localStorage.getItem('captainToken');
     if (token) {
@@ -34,10 +38,21 @@ const CaptainPortal = () => {
             if (!res.data.hasPassword) {
               setShowSetPasswordModal(true);
             }
+            // Set captain ID for further use
+            if (res.data.captainId) {
+              setCaptainId(res.data.captainId);
+            }
           })
           .catch(err => console.error("Error checking password status:", err));
       }
     }
+
+    // Clean up WebSocket on unmount
+    return () => {
+      if (newSocket) {
+        newSocket.disconnect();
+      }
+    };
   }, []);
 
   useEffect(() => {
@@ -154,6 +169,66 @@ const CaptainPortal = () => {
     const interval = setInterval(fetchCaptainLocation, 3000);
     return () => clearInterval(interval);
   }, [captainId, isRideActive]);
+
+  // Fetch current attendance count and listen for real-time updates
+  useEffect(() => {
+    if (!captainId || !socket) return;
+
+    // Join captain room for attendance updates
+    socket.emit('join_captain_session', captainId);
+    console.log(`📡 Captain Portal joined captain room: captain:${captainId}`);
+
+    // Listen for student onboarding events
+    socket.on('student_onboarded', (data) => {
+      console.log('📊 Captain Portal received student onboarded:', data);
+      if (data.studentsOnboard !== undefined) {
+        setStudentsInRide(data.studentsOnboard);
+      }
+    });
+
+    // Listen for attendance updates
+    socket.on('attendance_update', (data) => {
+      console.log('📊 Captain Portal received attendance update:', data);
+      if (data.data && data.data.studentsOnboard !== undefined) {
+        setStudentsInRide(data.data.studentsOnboard);
+      }
+    });
+
+    // Listen for session ended events
+    socket.on('session_ended', (data) => {
+      console.log('🔚 Captain Portal received session ended:', data);
+      setStudentsInRide(0);
+    });
+
+    // Fetch current session data to get accurate count
+    const fetchCurrentAttendance = async () => {
+      try {
+        const response = await axios.get(`http://localhost:5000/api/attendance/captain/${captainId}/session-status`);
+        
+        if (response.data.success && response.data.data.hasActiveSession) {
+          const studentsOnboard = response.data.data.sessionData.studentsOnboard || 0;
+          setStudentsInRide(studentsOnboard);
+          console.log(`📊 Captain Portal loaded current attendance: ${studentsOnboard} students`);
+        } else {
+          setStudentsInRide(0);
+          console.log('📊 Captain Portal: No active session found');
+        }
+      } catch (error) {
+        console.error('❌ Captain Portal error fetching attendance:', error);
+        setStudentsInRide(0);
+      }
+    };
+
+    fetchCurrentAttendance();
+
+    return () => {
+      if (socket) {
+        socket.off('student_onboarded');
+        socket.off('attendance_update');
+        socket.off('session_ended');
+      }
+    };
+  }, [captainId, socket]);
 
   const handleSetPassword = async () => {
     const phone = localStorage.getItem("captainPhone");
@@ -398,8 +473,11 @@ const CaptainPortal = () => {
         <div className="bg-blue-100 p-8 rounded-lg shadow-lg flex items-center justify-between">
           <div>
             <h1 className="text-4xl font-bold text-orange-500">CUST</h1>
-            <h2 className="text-2xl font-semibold mt-4">Students in Ride</h2>
-            <p className="text-6xl font-bold mt-2">{studentsInRide}</p>
+            <h2 className="text-2xl font-semibold mt-4">Students Onboarded</h2>
+            <p className="text-6xl font-bold mt-2 text-blue-600">{studentsInRide}</p>
+            <p className="text-sm text-gray-600 mt-2">
+              {isRideActive ? 'Live Count' : 'No Active Ride'}
+            </p>
           </div>
         </div>
       </div>
@@ -443,12 +521,14 @@ const CaptainPortal = () => {
       )}
 
       {/* Attendance Management Panel */}
-      {/* <div className="p-8">
-        <CaptainAttendancePanel 
-          captainId={captainId} 
-          routeName={routeName} 
-        />
-      </div> */}
+      {isRideActive && captainId && (
+        <div className="p-8">
+          <CaptainAttendancePanel 
+            captainId={captainId} 
+            routeName={routeName} 
+          />
+        </div>
+      )}
 
       <div className="fixed bottom-4 right-4">
         <FaRobot className="text-6xl text-blue-600 cursor-pointer" title="Chatbot" />

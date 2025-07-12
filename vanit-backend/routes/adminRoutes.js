@@ -48,6 +48,70 @@ router.put('/assign-route', async (req, res) => {
 
 /**
  * ---------------------------
+ * ✅ ADMIN DASHBOARD ENDPOINTS
+ * ---------------------------
+ */
+
+// Get total buses count
+router.get('/buses/count', async (req, res) => {
+  try {
+    const [result] = await pool.query('SELECT COUNT(*) as count FROM buses');
+    res.status(200).json({ count: result[0].count || 0 });
+  } catch (error) {
+    console.error('❌ Error fetching buses count:', error);
+    res.status(500).json({ count: 0, error: 'Failed to fetch buses count' });
+  }
+});
+
+// Get all captains
+router.get('/captains', async (req, res) => {
+  try {
+    const [captains] = await pool.query(`
+      SELECT id, first_name, last_name, phone, route_name, is_active 
+      FROM captains 
+      ORDER BY first_name, last_name
+    `);
+    res.status(200).json({ 
+      success: true, 
+      data: captains,
+      count: captains.length 
+    });
+  } catch (error) {
+    console.error('❌ Error fetching captains:', error);
+    res.status(500).json({ 
+      success: false, 
+      data: [], 
+      error: 'Failed to fetch captains' 
+    });
+  }
+});
+
+// Get active captains only
+router.get('/captains/active', async (req, res) => {
+  try {
+    const [activeCaptains] = await pool.query(`
+      SELECT id, first_name, last_name, phone, route_name, is_active 
+      FROM captains 
+      WHERE is_active = 1
+      ORDER BY first_name, last_name
+    `);
+    res.status(200).json({ 
+      success: true, 
+      data: activeCaptains,
+      count: activeCaptains.length 
+    });
+  } catch (error) {
+    console.error('❌ Error fetching active captains:', error);
+    res.status(500).json({ 
+      success: false, 
+      data: [], 
+      error: 'Failed to fetch active captains' 
+    });
+  }
+});
+
+/**
+ * ---------------------------
  * ✅ ADMIN ATTENDANCE ENDPOINTS
  * ---------------------------
  */
@@ -98,26 +162,40 @@ router.get('/attendance/stats', async (req, res) => {
 // Get active boarding sessions for admin
 router.get('/attendance/active-sessions', async (req, res) => {
   try {
+    console.log('🔍 Admin requesting active sessions...');
+    
     const [sessions] = await pool.query(`
       SELECT 
-        bs.id as session_id,
+        bs.session_id,
         bs.captain_id,
         bs.route_name,
         bs.session_start,
         bs.students_onboard,
+        bs.is_active,
         c.first_name as captain_first_name,
-        c.last_name as captain_last_name
+        c.last_name as captain_last_name,
+        c.phone as captain_phone
       FROM boarding_sessions bs
       JOIN captains c ON bs.captain_id = c.id
-      WHERE bs.session_end IS NULL
+      WHERE bs.is_active = 1
       ORDER BY bs.session_start DESC
     `);
 
-    res.status(200).json(sessions);
+    console.log(`📊 Found ${sessions.length} active sessions in database`);
+    
+    res.status(200).json({
+      success: true,
+      data: sessions,
+      message: `Found ${sessions.length} active boarding sessions`
+    });
 
   } catch (error) {
-    console.error('Error fetching active sessions:', error);
-    res.status(500).json({ message: 'Error fetching active sessions' });
+    console.error('❌ Error fetching active sessions:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch active sessions',
+      details: error.message
+    });
   }
 });
 

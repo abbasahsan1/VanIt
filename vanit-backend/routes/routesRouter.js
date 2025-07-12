@@ -2,7 +2,46 @@ const express = require("express");
 const router = express.Router();
 const pool = require("../config/db");
 
-// ✅ Add a New Route with Stops (Unchanged)
+// ✅ Add a New Rou// Get all routes
+router.get('/routes/all', async (req, res) => {
+    try {
+      const [routes] = await pool.query('SELECT id, route_name FROM routes');
+      res.status(200).json(routes);
+    } catch (error) {
+      console.error("❌ Error fetching routes:", error);
+      res.status(500).json({ message: 'Error fetching routes' });
+    }
+});
+
+// Get students for a specific route
+router.get('/routes/:routeName/students', async (req, res) => {
+    try {
+        const { routeName } = req.params;
+        
+        console.log(`🔍 Fetching students for route: "${routeName}"`);
+        
+        const [students] = await pool.query(
+            'SELECT id, first_name, last_name, registration_number, route_name, stop_name, email, phone FROM students WHERE route_name = ?',
+            [routeName]
+        );
+        
+        console.log(`📊 Found ${students.length} students on route "${routeName}"`);
+        
+        res.status(200).json({ 
+            success: true, 
+            routeName: routeName,
+            count: students.length,
+            data: students 
+        });
+    } catch (error) {
+        console.error("❌ Error fetching students for route:", error);
+        res.status(500).json({ 
+            success: false, 
+            message: 'Error fetching students for route',
+            error: error.message 
+        });
+    }
+});ops (Unchanged)
 router.post("/routes", async (req, res) => {
     const { route_name, stops } = req.body;
 

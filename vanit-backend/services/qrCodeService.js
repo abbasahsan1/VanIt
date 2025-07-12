@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const QRCode = require('qrcode');
 const pool = require('../config/db');
 
 class QRCodeService {
@@ -9,7 +10,7 @@ class QRCodeService {
     /**
      * Generate a secure QR code for a route
      * @param {string} routeName - Name of the route
-     * @returns {string} - Base64 encoded QR data
+     * @returns {object} - QR code data and image
      */
     async generateRouteQRCode(routeName) {
         try {
@@ -29,8 +30,35 @@ class QRCodeService {
             const hash = crypto.createHash('sha256').update(dataToHash).digest('hex');
             qrPayload.hash = hash;
 
-            // Encode as base64 for QR code
+            // Encode as base64 for QR code scanning
             const qrData = Buffer.from(JSON.stringify(qrPayload)).toString('base64');
+
+            // Generate actual QR code image with high quality PNG output
+            const qrCodeImage = await QRCode.toDataURL(qrData, {
+                type: 'image/png',
+                width: 512,
+                margin: 2,
+                color: {
+                    dark: '#000000FF',
+                    light: '#FFFFFFFF'
+                },
+                errorCorrectionLevel: 'H',
+                rendererOpts: {
+                    quality: 1.0
+                }
+            });
+
+            // Generate high-quality buffer for download with proper PNG headers
+            const qrCodeBuffer = await QRCode.toBuffer(qrData, {
+                type: 'png',
+                width: 512,
+                margin: 2,
+                color: {
+                    dark: '#000000',
+                    light: '#FFFFFF'
+                },
+                errorCorrectionLevel: 'H'
+            });
 
             // Store QR code in database
             await pool.query(
@@ -39,7 +67,14 @@ class QRCodeService {
             );
 
             console.log(`✅ Generated QR code for route: ${routeName}`);
-            return qrData;
+            return {
+                qrData: qrData,
+                qrImage: qrCodeImage,
+                qrBuffer: qrCodeBuffer,
+                routeName: routeName,
+                generatedAt: timestamp,
+                expiresAt: expiryTime
+            };
         } catch (error) {
             console.error('Error generating QR code:', error);
             throw new Error('Failed to generate QR code');
@@ -116,7 +151,7 @@ class QRCodeService {
     /**
      * Get stored QR code for a route
      * @param {string} routeName - Name of the route
-     * @returns {string|null} - QR code data or null
+     * @returns {object|null} - QR code data and image or null
      */
     async getRouteQRCode(routeName) {
         try {
@@ -139,7 +174,27 @@ class QRCodeService {
                 return await this.generateRouteQRCode(routeName);
             }
 
-            return result[0].qr_code;
+            // Generate QR image from stored data
+            const qrCodeImage = await QRCode.toDataURL(result[0].qr_code, {
+                type: 'image/png',
+                width: 512,
+                margin: 2,
+                color: {
+                    dark: '#000000FF',
+                    light: '#FFFFFFFF'
+                },
+                errorCorrectionLevel: 'H',
+                rendererOpts: {
+                    quality: 1.0
+                }
+            });
+
+            return {
+                qrData: result[0].qr_code,
+                qrImage: qrCodeImage,
+                routeName: routeName,
+                generatedAt: result[0].qr_generated_at
+            };
         } catch (error) {
             console.error('Error getting route QR code:', error);
             return null;

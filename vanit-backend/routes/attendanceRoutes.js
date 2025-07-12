@@ -94,15 +94,17 @@ router.post('/generate-qr/:routeName', async (req, res) => {
             });
         }
 
-        const qrData = await qrCodeService.generateRouteQRCode(routeName);
+        const qrResult = await qrCodeService.generateRouteQRCode(routeName);
 
         res.status(200).json({
             success: true,
             message: 'QR code generated successfully',
             data: {
                 routeName: routeName,
-                qrData: qrData,
-                generatedAt: new Date().toISOString()
+                qrData: qrResult.qrData,
+                qrImage: qrResult.qrImage,
+                generatedAt: new Date(qrResult.generatedAt).toISOString(),
+                expiresAt: new Date(qrResult.expiresAt).toISOString()
             }
         });
     } catch (error) {
@@ -116,6 +118,43 @@ router.post('/generate-qr/:routeName', async (req, res) => {
 
 /**
  * ---------------------------
+ * ✅ Download QR Code as PNG (GET)
+ * ---------------------------
+ */
+router.get('/download-qr/:routeName', async (req, res) => {
+    const { routeName } = req.params;
+
+    try {
+        // Generate fresh QR code for download
+        const qrResult = await qrCodeService.generateRouteQRCode(routeName);
+
+        if (!qrResult || !qrResult.qrBuffer) {
+            return res.status(404).json({
+                success: false,
+                error: 'Failed to generate QR code for download'
+            });
+        }
+
+        // Set proper headers for PNG download
+        res.setHeader('Content-Type', 'image/png');
+        res.setHeader('Content-Disposition', `attachment; filename="${routeName}-qr-code.png"`);
+        res.setHeader('Content-Length', qrResult.qrBuffer.length);
+        
+        // Send the PNG buffer
+        res.send(qrResult.qrBuffer);
+        
+        console.log(`📥 QR code downloaded for route: ${routeName}`);
+    } catch (error) {
+        console.error('Error downloading QR code:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to download QR code'
+        });
+    }
+});
+
+/**
+ * ---------------------------
  * ✅ Get QR Code for Route (GET)
  * ---------------------------
  */
@@ -123,9 +162,9 @@ router.get('/qr-code/:routeName', async (req, res) => {
     const { routeName } = req.params;
 
     try {
-        const qrData = await qrCodeService.getRouteQRCode(routeName);
+        const qrResult = await qrCodeService.getRouteQRCode(routeName);
 
-        if (!qrData) {
+        if (!qrResult) {
             return res.status(404).json({
                 success: false,
                 error: 'QR code not found for this route'
@@ -136,7 +175,9 @@ router.get('/qr-code/:routeName', async (req, res) => {
             success: true,
             data: {
                 routeName: routeName,
-                qrData: qrData
+                qrData: qrResult.qrData,
+                qrImage: qrResult.qrImage,
+                generatedAt: qrResult.generatedAt
             }
         });
     } catch (error) {

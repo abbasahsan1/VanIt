@@ -12,23 +12,117 @@ import {
   FaQrcode
 } from "react-icons/fa";
 import axios from "axios";
+import io from "socket.io-client";
 
 const AdminDashboard = () => {
   const navigate = useNavigate();
   const [emergencyAlerts, setEmergencyAlerts] = useState([]);
+  const [dashboardStats, setDashboardStats] = useState({
+    totalBuses: 0,
+    totalCaptains: 0,
+    totalRoutes: 0,
+    activeBuses: 0,
+    activeCaptains: 0,
+    activeRoutes: 0
+  });
+  const [loading, setLoading] = useState(true);
+  const [socket, setSocket] = useState(null);
+
+  // Initialize WebSocket connection for real-time updates
+  useEffect(() => {
+    const newSocket = io('http://localhost:5000');
+    
+    newSocket.on('connect', () => {
+      console.log('✅ Admin Dashboard WebSocket connected');
+      newSocket.emit('join_admin_dashboard');
+    });
+
+    newSocket.on('dashboard_stats_update', (updatedStats) => {
+      console.log('📊 Real-time dashboard stats update:', updatedStats);
+      setDashboardStats(prevStats => ({
+        ...prevStats,
+        ...updatedStats
+      }));
+    });
+
+    newSocket.on('captain_status_change', (data) => {
+      console.log('👨‍✈️ Captain status changed:', data);
+      fetchDashboardStats(); // Refresh stats when captain status changes
+    });
+
+    setSocket(newSocket);
+
+    return () => {
+      newSocket.close();
+    };
+  }, []);
+
+  // Fetch real-time dashboard statistics
+  const fetchDashboardStats = async () => {
+    try {
+      setLoading(true);
+      
+      // Fetch all data in parallel for better performance
+      const [busesRes, captainsRes, routesRes, activeCaptainsRes, activeSessionsRes] = await Promise.all([
+        axios.get('http://localhost:5000/api/admin/buses/count'),
+        axios.get('http://localhost:5000/api/admin/captains'),
+        axios.get('http://localhost:5000/api/routes/all'),
+        axios.get('http://localhost:5000/api/admin/captains/active'),
+        axios.get('http://localhost:5000/api/attendance/active-sessions')
+      ]);
+
+      // Calculate active routes from active sessions
+      const activeSessions = activeSessionsRes.data.success ? activeSessionsRes.data.data : [];
+      const activeRoutes = [...new Set(activeSessions.map(session => session.route_name))].length;
+
+      const stats = {
+        totalBuses: busesRes.data.count || 0,
+        totalCaptains: captainsRes.data.data ? captainsRes.data.data.length : 0,
+        totalRoutes: routesRes.data ? routesRes.data.length : 0,
+        activeBuses: activeSessions.length, // Active buses = active sessions
+        activeCaptains: activeCaptainsRes.data.data ? activeCaptainsRes.data.data.length : 0,
+        activeRoutes: activeRoutes
+      };
+
+      setDashboardStats(stats);
+      
+      console.log('📊 Dashboard stats updated:', stats);
+      
+    } catch (error) {
+      console.error("❌ Error fetching dashboard stats:", error);
+      // Set fallback values
+      setDashboardStats({
+        totalBuses: 0,
+        totalCaptains: 0,
+        totalRoutes: 0,
+        activeBuses: 0,
+        activeCaptains: 0,
+        activeRoutes: 0
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // ✅ Fetch Emergency Alerts from Backend
-  useEffect(() => {
-    const fetchAlerts = async () => {
-      try {
-        const response = await axios.get("http://localhost:5000/api/admin/emergency-alerts");
-        setEmergencyAlerts(response.data);
-      } catch (error) {
-        console.error("❌ Error fetching alerts:", error);
-      }
-    };
+  const fetchEmergencyAlerts = async () => {
+    try {
+      const response = await axios.get("http://localhost:5000/api/admin/emergency-alerts");
+      setEmergencyAlerts(response.data);
+    } catch (error) {
+      console.error("❌ Error fetching alerts:", error);
+    }
+  };
 
-    fetchAlerts();
+  // Initial data fetch
+  useEffect(() => {
+    fetchDashboardStats();
+    fetchEmergencyAlerts();
+    
+    // Set up periodic refresh every 30 seconds
+    const interval = setInterval(fetchDashboardStats, 30000);
+    
+    return () => clearInterval(interval);
   }, []);
 
   // ✅ Handle Logout
@@ -99,6 +193,9 @@ const AdminDashboard = () => {
             <div className="bg-[#7DB4E6] p-6 rounded-lg shadow-lg flex justify-between items-center">
               <div>
                 <h2 className="text-xl font-bold text-orange-600">Total Buses</h2>
+                <p className="text-2xl font-bold text-blue-800">
+                  {loading ? '...' : dashboardStats.totalBuses}
+                </p>
               </div>
               <FaBus className="text-blue-800 text-3xl" />
             </div>
@@ -107,6 +204,9 @@ const AdminDashboard = () => {
             <div className="bg-[#7DB4E6] p-6 rounded-lg shadow-lg flex justify-between items-center">
               <div>
                 <h2 className="text-xl font-bold text-orange-600">Total Captains</h2>
+                <p className="text-2xl font-bold text-blue-800">
+                  {loading ? '...' : dashboardStats.totalCaptains}
+                </p>
               </div>
               <FaUserTie className="text-blue-800 text-3xl" />
             </div>
@@ -115,6 +215,9 @@ const AdminDashboard = () => {
             <div className="bg-[#7DB4E6] p-6 rounded-lg shadow-lg flex justify-between items-center">
               <div>
                 <h2 className="text-xl font-bold text-orange-600">Total Routes</h2>
+                <p className="text-2xl font-bold text-blue-800">
+                  {loading ? '...' : dashboardStats.totalRoutes}
+                </p>
               </div>
               <FaMapMarkedAlt className="text-blue-800 text-3xl" />
             </div>
@@ -123,6 +226,9 @@ const AdminDashboard = () => {
             <div className="bg-[#5392C9] p-6 rounded-lg shadow-lg flex justify-between items-center">
               <div>
                 <h2 className="text-xl font-bold text-orange-600">Active Buses</h2>
+                <p className="text-2xl font-bold text-white">
+                  {loading ? '...' : dashboardStats.activeBuses}
+                </p>
               </div>
               <FaBus className="text-blue-900 text-3xl" />
             </div>
@@ -131,6 +237,9 @@ const AdminDashboard = () => {
             <div className="bg-[#5392C9] p-6 rounded-lg shadow-lg flex justify-between items-center">
               <div>
                 <h2 className="text-xl font-bold text-orange-600">Active Captains</h2>
+                <p className="text-2xl font-bold text-white">
+                  {loading ? '...' : dashboardStats.activeCaptains}
+                </p>
               </div>
               <FaUserTie className="text-blue-900 text-3xl" />
             </div>
@@ -139,6 +248,9 @@ const AdminDashboard = () => {
             <div className="bg-[#5392C9] p-6 rounded-lg shadow-lg flex justify-between items-center">
               <div>
                 <h2 className="text-xl font-bold text-orange-600">Active Routes</h2>
+                <p className="text-2xl font-bold text-white">
+                  {loading ? '...' : dashboardStats.activeRoutes}
+                </p>
               </div>
               <FaMapPin className="text-blue-900 text-3xl" />
             </div>

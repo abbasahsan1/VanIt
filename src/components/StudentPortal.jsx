@@ -257,7 +257,14 @@ const StudentPortal = () => {
                 Back to Dashboard
               </button>
             </div>
-            <QRScanner studentId={studentData.id} />
+            <QRScanner 
+              studentId={studentData.id} 
+              onClose={() => setActiveTab('dashboard')}
+              onScanSuccess={(data) => {
+                console.log('QR scan successful:', data);
+                // Optionally show a success message or update UI
+              }}
+            />
           </div>
         )}
         

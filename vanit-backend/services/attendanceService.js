@@ -79,21 +79,22 @@ class AttendanceService {
                 captainId = activeCaptains[0].id;
             }
 
-            // Check for duplicate scans (prevent scanning multiple times in short period)
-            const recentScanKey = `${studentId}:${routeName}`;
-            const lastScanTime = this.recentScans.get(recentScanKey);
-            const now = Date.now();
+            // Get or create active boarding session
+            let sessionId = await this.getOrCreateBoardingSession(connection, captainId, routeName);
 
-            if (lastScanTime && (now - lastScanTime) < this.duplicateScanThresholdMs) {
+            // Check if student has already boarded this session
+            const [existingLogs] = await connection.query(
+                'SELECT COUNT(*) as scan_count FROM attendance_logs WHERE student_id = ? AND session_id = ?',
+                [studentId, sessionId]
+            );
+
+            if (existingLogs[0].scan_count > 0) {
                 await connection.rollback();
                 return {
                     success: false,
-                    error: 'You have already scanned recently. Please wait a moment before scanning again.'
+                    error: "You've already boarded this bus. Multiple check-ins are not allowed per session."
                 };
             }
-
-            // Get or create active boarding session
-            let sessionId = await this.getOrCreateBoardingSession(connection, captainId, routeName);
 
             // Create attendance log
             const scanTimestamp = new Date();
@@ -395,27 +396,19 @@ class AttendanceService {
             const [totalResult] = await pool.query(query, params);
             stats.totalScans = totalResult[0].total_scans;
 
-            // Unique students
-            query = 'SELECT COUNT(DISTINCT student_id) as unique_students FROM attendance_logs WHERE 1=1';
-            params = [];
-
-            if (filters.dateFrom) {
-                query += ' AND DATE(scan_timestamp) >= ?';
-                params.push(filters.dateFrom);
-            }
-
-            if (filters.dateTo) {
-                query += ' AND DATE(scan_timestamp) <= ?';
-                params.push(filters.dateTo);
-            }
+            // Total registered students (from students table, not just those who attended)
+            let totalStudentsQuery = 'SELECT COUNT(*) as total_registered FROM students WHERE 1=1';
+            let totalStudentsParams = [];
 
             if (filters.routeName) {
-                query += ' AND route_name = ?';
-                params.push(filters.routeName);
+                totalStudentsQuery += ' AND route_name = ?';
+                totalStudentsParams.push(filters.routeName);
             }
 
-            const [uniqueResult] = await pool.query(query, params);
-            stats.uniqueStudents = uniqueResult[0].unique_students;
+            const [totalStudentsResult] = await pool.query(totalStudentsQuery, totalStudentsParams);
+            stats.uniqueStudents = totalStudentsResult[0].total_registered;
+
+            console.log(`📊 Total registered students: ${stats.uniqueStudents} (route filter: ${filters.routeName || 'none'})`);
 
             // Scans by route
             query = `

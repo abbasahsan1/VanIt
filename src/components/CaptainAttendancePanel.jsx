@@ -19,32 +19,74 @@ const CaptainAttendancePanel = ({ captainId, routeName }) => {
 
     // Join captain room for real-time updates
     if (captainId) {
-      newSocket.emit('join-captain-room', captainId);
+      newSocket.emit('join_captain_session', captainId);
+      console.log(`📡 Joined captain room: captain:${captainId}`);
     }
 
     // Listen for attendance updates
-    newSocket.on('attendance-update', (data) => {
-      if (data.route_name === routeName) {
-        setRecentScans(prev => [data, ...prev.slice(0, 4)]); // Keep last 5 scans
-        setAttendanceCount(prev => prev + 1);
+    newSocket.on('student_onboarded', (data) => {
+      console.log('📥 Student onboarded:', data);
+      setRecentScans(prev => [{
+        student_name: data.studentName,
+        registration_number: data.registrationNumber,
+        stop_name: data.stopName,
+        scan_time: data.timestamp
+      }, ...prev.slice(0, 4)]); // Keep last 5 scans
+      setAttendanceCount(data.studentsOnboard);
+      
+      // Show notification
+      showNotification(`${data.studentName} boarded the bus`, 'success');
+    });
+
+    newSocket.on('attendance_update', (data) => {
+      if (data.data && data.data.routeName === routeName) {
+        setRecentScans(prev => [{
+          student_name: data.data.studentName,
+          registration_number: data.data.registrationNumber,
+          stop_name: data.data.stopName,
+          scan_time: data.data.scanTimestamp
+        }, ...prev.slice(0, 4)]); // Keep last 5 scans
+        setAttendanceCount(data.data.studentsOnboard);
         
         // Show notification
-        showNotification(`${data.student_name} boarded the bus`, 'success');
+        showNotification(`${data.data.studentName} boarded the bus`, 'success');
       }
     });
 
     // Listen for session updates
-    newSocket.on('session-update', (data) => {
-      if (data.route_name === routeName) {
-        setBoardingSession(data);
-        setSessionActive(data.status === 'active');
+    newSocket.on('session_ended', (data) => {
+      if (data.routeName === routeName) {
+        setBoardingSession(null);
+        setSessionActive(false);
+        setAttendanceCount(0);
+        showNotification('Boarding session ended', 'info');
       }
     });
+
+    // Load current session status
+    loadCurrentSession();
 
     return () => {
       newSocket.disconnect();
     };
   }, [captainId, routeName]);
+
+  const loadCurrentSession = async () => {
+    try {
+      const response = await axios.get(`http://localhost:5000/api/attendance/captain/${captainId}/session-status`);
+      
+      if (response.data.success && response.data.data.hasActiveSession) {
+        const sessionData = response.data.data.sessionData;
+        setBoardingSession(sessionData);
+        setSessionActive(true);
+        setAttendanceCount(sessionData.studentsOnboard || 0);
+        
+        console.log(`📊 Loaded active session with ${sessionData.studentsOnboard} students`);
+      }
+    } catch (error) {
+      console.error('Error loading current session:', error);
+    }
+  };
 
   const startBoardingSession = async () => {
     try {
@@ -53,14 +95,16 @@ const CaptainAttendancePanel = ({ captainId, routeName }) => {
         routeName
       });
       
-      setBoardingSession(response.data.session);
-      setQrCode(response.data.qrCode);
-      setQrExpiry(new Date(response.data.expiresAt));
-      setSessionActive(true);
-      setAttendanceCount(0);
-      setRecentScans([]);
-      
-      showNotification('Boarding session started successfully!', 'success');
+      if (response.data.success) {
+        setSessionActive(true);
+        setAttendanceCount(0);
+        setRecentScans([]);
+        
+        showNotification('Boarding session started successfully!', 'success');
+        
+        // Load the created session details
+        await loadCurrentSession();
+      }
     } catch (error) {
       console.error('Error starting session:', error);
       showNotification('Failed to start boarding session', 'error');
@@ -69,19 +113,26 @@ const CaptainAttendancePanel = ({ captainId, routeName }) => {
 
   const endBoardingSession = async () => {
     try {
-      await axios.post('http://localhost:5000/api/attendance/end-session', {
-        sessionId: boardingSession?.id
+      const response = await axios.post('http://localhost:5000/api/attendance/end-session', {
+        captainId: captainId,
+        routeName: routeName
       });
       
-      setBoardingSession(null);
-      setSessionActive(false);
-      setQrCode(null);
-      setQrExpiry(null);
-      
-      showNotification('Boarding session ended successfully!', 'success');
+      if (response.data.success) {
+        setBoardingSession(null);
+        setSessionActive(false);
+        setQrCode(null);
+        setQrExpiry(null);
+        setAttendanceCount(0);
+        setRecentScans([]);
+        
+        showNotification('Boarding session ended successfully!', 'success');
+      } else {
+        showNotification(response.data.error || 'Failed to end boarding session', 'error');
+      }
     } catch (error) {
       console.error('Error ending session:', error);
-      showNotification('Failed to end boarding session', 'error');
+      showNotification(error.response?.data?.error || 'Failed to end boarding session', 'error');
     }
   };
 

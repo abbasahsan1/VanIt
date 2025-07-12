@@ -132,6 +132,31 @@ router.post('/captain/:captainId/start-tracking', async (req, res) => {
 
 /**
  * ---------------------------
+ * ✅ Get Captain Tracking Status (GET)
+ * ---------------------------
+ */
+router.get('/captain/:captainId/status', async (req, res) => {
+    const { captainId } = req.params;
+
+    try {
+        const locationService = require('../services/locationService');
+        const isTracking = locationService.isTracking(parseInt(captainId));
+        const location = locationService.getCaptainLocation(parseInt(captainId));
+
+        res.status(200).json({
+            captainId: parseInt(captainId),
+            isTracking: isTracking,
+            location: location || null,
+            timestamp: new Date().toISOString()
+        });
+    } catch (error) {
+        console.error('Error getting captain tracking status:', error);
+        res.status(500).json({ error: "Internal server error" });
+    }
+});
+
+/**
+ * ---------------------------
  * ✅ Stop Location Tracking (POST)
  * ---------------------------
  */

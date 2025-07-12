@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { FaQrcode, FaCamera, FaCameraRotate } from 'react-icons/fa6';
 import { FaCheckCircle, FaExclamationTriangle, FaTimes } from 'react-icons/fa';
+import jsQR from 'jsqr';
 import axios from 'axios';
 
 const QRScanner = ({ studentId, onScanSuccess, onClose }) => {
@@ -104,16 +105,16 @@ const QRScanner = ({ studentId, onScanSuccess, onClose }) => {
     }
   };
 
-  // Simple QR code detection (placeholder - in production use jsQR library)
+  // Actual QR code detection using jsQR
   const detectQRCode = async (canvas) => {
-    // This is a simplified version. In production, you would use jsQR library:
-    // import jsQR from 'jsqr';
-    // const code = jsQR(imageData.data, imageData.width, imageData.height);
-    // return code?.data;
+    const context = canvas.getContext('2d');
+    const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
     
-    // For now, we'll simulate QR detection by looking for a specific pattern
-    // In real implementation, replace this with actual QR code detection
-    return null;
+    const code = jsQR(imageData.data, imageData.width, imageData.height, {
+      inversionAttempts: "dontInvert",
+    });
+    
+    return code?.data || null;
   };
 
   // Simulate QR code scanning with manual input for demo

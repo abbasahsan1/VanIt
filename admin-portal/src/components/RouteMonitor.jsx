@@ -26,32 +26,40 @@ const RouteMonitor = () => {
   const markersRef = useRef({});
 
   useEffect(() => {
-    const newSocket = io('http://localhost:5000');
+    const newSocket = io('http://localhost:5000', {
+      timeout: 5000,
+      forceNew: true
+    });
     
     newSocket.on('connect', () => {
-      console.log('Connected to WebSocket server');
+      console.log('✅ Route Monitor WebSocket connected');
       setIsConnected(true);
     });
 
-    newSocket.on('disconnect', () => {
-      console.log('Disconnected from WebSocket server');
+    newSocket.on('disconnect', (reason) => {
+      console.log('❌ Route Monitor WebSocket disconnected:', reason);
+      setIsConnected(false);
+    });
+
+    newSocket.on('connect_error', (error) => {
+      console.error('❌ Route Monitor WebSocket connection error:', error);
       setIsConnected(false);
     });
 
     newSocket.on('location_update', (data) => {
-      console.log('Received location update:', data);
+      console.log('📍 Received location update:', data);
       updateCaptainLocation(data);
     });
 
     // Listen for attendance updates to get real student counts
     newSocket.on('attendance_update', (data) => {
-      console.log('Received attendance update:', data);
+      console.log('📊 Received attendance update:', data);
       updateStudentCount(data);
     });
 
     // Listen for session updates
     newSocket.on('session_ended', (data) => {
-      console.log('Session ended:', data);
+      console.log('🔚 Session ended:', data);
       fetchActiveSessions();
     });
 

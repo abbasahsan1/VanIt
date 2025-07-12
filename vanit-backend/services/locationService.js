@@ -314,6 +314,12 @@ class LocationService {
         console.log(`Stopped tracking for captain ${normalizedCaptainId}`);
     }
 
+    // Check if captain is currently being tracked
+    isTracking(captainId) {
+        const normalizedCaptainId = parseInt(captainId);
+        return this.activeCaptains.has(normalizedCaptainId);
+    }
+
     // Get all active captains
     getActiveCaptains() {
         return Array.from(this.activeCaptains.entries()).map(([captainId, location]) => ({
