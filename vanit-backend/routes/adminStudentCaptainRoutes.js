@@ -22,10 +22,14 @@ const storage = multer.diskStorage({
 router.get('/students', async (req, res) => {
     try {
         const query = `
-            SELECT first_name, last_name, registration_number, semester, route_name, stop_name, phone, emergency_contact, address 
+            SELECT id, first_name, last_name, registration_number, semester, route_name, stop_name, phone, emergency_contact, address 
             FROM students
+            ORDER BY first_name, last_name
         `;
         const [students] = await pool.query(query);
+        
+        console.log(`📊 Admin fetched ${students.length} students with IDs`);
+        
         res.status(200).json(students);
     } catch (error) {
         console.error("Error fetching students:", error);

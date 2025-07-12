@@ -112,6 +112,182 @@ router.get('/captains/active', async (req, res) => {
 
 /**
  * ---------------------------
+ * ✅ ADMIN STUDENT MANAGEMENT ENDPOINTS
+ * ---------------------------
+ */
+
+// Get all students (admin view)
+router.get('/students', async (req, res) => {
+  try {
+    const query = `
+      SELECT id, first_name, last_name, registration_number, semester, route_name, stop_name, phone, emergency_contact, address 
+      FROM students
+      ORDER BY first_name, last_name
+    `;
+    const [students] = await pool.query(query);
+    
+    console.log(`📊 Admin fetched ${students.length} students with IDs`);
+    
+    res.status(200).json(students);
+  } catch (error) {
+    console.error("❌ Error fetching students:", error);
+    res.status(500).json({ 
+      success: false,
+      error: "Internal server error",
+      details: error.message 
+    });
+  }
+});
+
+/**
+ * ---------------------------
+ * ✅ ADMIN STUDENT ATTENDANCE ENDPOINTS
+ * ---------------------------
+ */
+
+// Get attendance history for a specific student (admin view)
+router.get('/students/:studentId/attendance', async (req, res) => {
+  try {
+    const { studentId } = req.params;
+    const { dateFrom, dateTo, limit = 50 } = req.query;
+
+    console.log(`📊 Admin fetching attendance for student ID: ${studentId}`);
+    console.log(`📊 Filters - dateFrom: ${dateFrom}, dateTo: ${dateTo}, limit: ${limit}`);
+
+    // Validate studentId
+    if (!studentId || isNaN(parseInt(studentId))) {
+      console.error(`❌ Invalid student ID: ${studentId}`);
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid student ID provided'
+      });
+    }
+
+    // First check if student exists
+    const [studentCheck] = await pool.query(
+      'SELECT id, first_name, last_name, registration_number FROM students WHERE id = ?',
+      [parseInt(studentId)]
+    );
+
+    if (studentCheck.length === 0) {
+      console.error(`❌ Student not found with ID: ${studentId}`);
+      return res.status(404).json({
+        success: false,
+        error: 'Student not found'
+      });
+    }
+
+    console.log(`✅ Student found: ${studentCheck[0].first_name} ${studentCheck[0].last_name} (${studentCheck[0].registration_number})`);
+
+    // Use the exact same logic as the student endpoint
+    const attendanceService = require('../services/attendanceService');
+    
+    const filters = {
+      studentId: parseInt(studentId),
+      dateFrom: dateFrom,
+      dateTo: dateTo,
+      limit: limit ? parseInt(limit) : 50
+    };
+
+    console.log(`📊 Calling attendanceService.getAttendanceLogs with filters:`, filters);
+
+    // Use the exact same service call as the student endpoint
+    const logs = await attendanceService.getAttendanceLogs(filters);
+
+    console.log(`📊 Raw attendance logs from service:`, logs.length);
+    if (logs.length > 0) {
+      console.log(`📊 Sample record:`, logs[0]);
+    }
+
+    console.log(`✅ Successfully retrieved ${logs.length} attendance records for student ${studentId}`);
+
+    // Return the exact same format as the student endpoint
+    res.status(200).json({
+      success: true,
+      data: logs,
+      count: logs.length,
+      studentId: studentId,
+      studentInfo: studentCheck[0]
+    });
+
+  } catch (error) {
+    console.error('❌ Detailed error fetching student attendance:', {
+      message: error.message,
+      stack: error.stack,
+      studentId: req.params.studentId
+    });
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch student attendance history',
+      details: error.message
+    });
+  }
+});
+
+// Delete a specific attendance record (admin only)
+router.delete('/attendance/:attendanceId', async (req, res) => {
+  try {
+    const { attendanceId } = req.params;
+
+    console.log(`🗑️ Admin deleting attendance record ${attendanceId}`);
+
+    // First, get the record details for logging
+    const [recordDetails] = await pool.query(
+      `SELECT al.*, s.first_name, s.last_name, s.registration_number 
+       FROM attendance_logs al 
+       JOIN students s ON al.student_id = s.id 
+       WHERE al.id = ?`,
+      [attendanceId]
+    );
+
+    if (recordDetails.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'Attendance record not found'
+      });
+    }
+
+    const record = recordDetails[0];
+
+    // Delete the attendance record
+    const [deleteResult] = await pool.query(
+      'DELETE FROM attendance_logs WHERE id = ?',
+      [attendanceId]
+    );
+
+    if (deleteResult.affectedRows === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'Attendance record not found or already deleted'
+      });
+    }
+
+    console.log(`✅ Admin deleted attendance record: ${record.first_name} ${record.last_name} (${record.registration_number}) - ${record.scan_timestamp}`);
+
+    res.status(200).json({
+      success: true,
+      message: 'Attendance record deleted successfully',
+      deletedRecord: {
+        id: attendanceId,
+        studentName: `${record.first_name} ${record.last_name}`,
+        registrationNumber: record.registration_number,
+        scanTimestamp: record.scan_timestamp,
+        routeName: record.route_name
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error deleting attendance record:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to delete attendance record',
+      details: error.message
+    });
+  }
+});
+
+/**
+ * ---------------------------
  * ✅ ADMIN ATTENDANCE ENDPOINTS
  * ---------------------------
  */

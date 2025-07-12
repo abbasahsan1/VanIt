@@ -52,7 +52,7 @@ app.use('/api', contactRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api', studentRoutes);
 app.use('/api', routesRouter);
-app.use('/api/admin', adminStudentCaptainRoutes);
+app.use('/api/admin/student-management', adminStudentCaptainRoutes);
 app.use("/api/emergency", emergencyRoutes);
 app.use("/api/bus-tracking", busTrackingRoutes);
 app.use('/api/auth/captains', captainAuthRoutes);
